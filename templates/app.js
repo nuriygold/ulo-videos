@@ -83,7 +83,7 @@ async function refreshToolStatus() {
     list.replaceChildren(...items);
   } catch {
     const item = document.createElement("li");
-    item.textContent = "Toolchain status unavailable; is the local server running?";
+    item.textContent = "Toolchain status unavailable; is the app's server running?";
     item.className = "tool-missing";
     list.replaceChildren(item);
   }
@@ -105,7 +105,7 @@ form.addEventListener("submit", async (event) => {
     }
     renderResult(body);
   } catch {
-    showError("Could not reach the local server; is it still running?");
+    showError("Could not reach the app's server; is it still running?");
   } finally {
     submitButton.disabled = false;
   }
