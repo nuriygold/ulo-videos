@@ -1,0 +1,13 @@
+# prompt-to-shot has zero Python package dependencies: the app and its tests
+# run on the Python standard library only (Python 3.11+). There is nothing to
+# install with pip for this project.
+#
+# The optional media tools below are system executables, not pip packages.
+# They are capability-detected on PATH at runtime (renderers.Toolchain), and a
+# missing tool is reported as plan status, never as a failure. See README.md
+# for macOS install steps and what each tool unlocks.
+#
+#   ffmpeg   required for the baseline render and final assembly
+#   blender  optional, renders the character plate
+#   piper    optional, local text-to-speech for dialogue.text
+#   rhubarb  optional, lip-sync mouth cues for the speech wav
