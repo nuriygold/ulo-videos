@@ -369,7 +369,7 @@ def _escape_drawtext_text(text):
     """
     flat = text.replace("\r", " ").replace("\n", " ")
     option_level = flat.replace("\\", "\\\\").replace("'", "\\'").replace(":", "\\:")
-    return option_level.replace("\\", "\\\\").replace("'", "\\'").replace(",", "\\,")
+    return option_level.replace("\\", "\\\\").replace("'", "\\'").replace(",", "\\,").replace(";", "\\;").replace("[", "\\[").replace("]", "\\]")
 
 
 def _caption_filter(caption_style, dialogue_text):

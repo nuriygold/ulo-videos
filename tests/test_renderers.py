@@ -207,6 +207,16 @@ class PlanFfmpegRenderTests(RenderersTestCase):
         filters = plan["argv"][plan["argv"].index("-vf") + 1]
         self.assertIn(r"drawtext=text=Isn\\\'t it\\: 100% \\\\done:expansion=none", filters)
 
+    def test_caption_text_escapes_filtergraph_separators(self):
+        scene = self.ready_scene()
+        scene["dialogue"]["text"] = "hold; freeze [now]"
+        chain = self.fake_toolchain(["ffmpeg"], filter_probe=lambda tool, name: True)
+
+        plan = plan_ffmpeg_render(scene, self.root, chain)
+
+        filters = plan["argv"][plan["argv"].index("-vf") + 1]
+        self.assertIn(r"drawtext=text=hold\; freeze \[now\]:expansion=none", filters)
+
     def test_keeps_metadata_only_caption_when_drawtext_is_unavailable(self):
         scene = self.ready_scene()
         chain = self.fake_toolchain(["ffmpeg"], filter_probe=lambda tool, name: False)
