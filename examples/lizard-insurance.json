@@ -1,0 +1,28 @@
+{
+  "background_video": "house_leak.mp4",
+  "branding": {
+    "caption_style": "lower_third",
+    "logo": "logo.svg"
+  },
+  "character": {
+    "asset": "assets/characters/lizard.blend",
+    "entrance": "pop_in",
+    "gesture": "shrug_and_point",
+    "position": "foreground_right"
+  },
+  "dialogue": {
+    "lip_sync": "rhubarb",
+    "text": "Every landlord knows real estate isn't passive...",
+    "voice": "local_voice_01"
+  },
+  "output": {
+    "format": "mp4",
+    "fps": 30,
+    "resolution": [
+      1920,
+      1080
+    ]
+  },
+  "pause_at": 7.4,
+  "template": "interruption_spokescharacter_v1"
+}
