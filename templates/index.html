@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:,">
+  <title>Prompt-to-Shot</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main class="layout">
+    <header class="masthead">
+      <h1>Prompt-to-Shot</h1>
+      <p class="tagline">
+        Compiles the interruption-spokescharacter template into a scene JSON
+        specification and plans the local FFmpeg preview command.
+      </p>
+    </header>
+
+    <section class="panel" aria-labelledby="tools-heading">
+      <h2 id="tools-heading">Toolchain status</h2>
+      <ul id="tool-list" class="tool-list"></ul>
+      <p class="hint">
+        Missing tools are reported as status, never as failures. The scene
+        specification stays usable; native renderers run on this machine only.
+      </p>
+    </section>
+
+    <form id="scene-form" class="panel">
+      <fieldset>
+        <legend>Template</legend>
+        <label>Template name
+          <select name="template">
+            <option value="interruption_spokescharacter_v1">interruption_spokescharacter_v1</option>
+          </select>
+        </label>
+      </fieldset>
+
+      <fieldset>
+        <legend>Scene</legend>
+        <label>Background video path
+          <input name="background_video" value="assets/house_leak.mp4" spellcheck="false">
+        </label>
+        <label>Pause at (seconds)
+          <input name="pause_at" value="7.4" inputmode="decimal">
+        </label>
+      </fieldset>
+
+      <fieldset>
+        <legend>Character</legend>
+        <label>Asset path
+          <input name="character.asset" value="assets/characters/lizard.blend" spellcheck="false">
+        </label>
+        <label>Position
+          <input name="character.position" value="foreground_right">
+        </label>
+        <label>Entrance
+          <input name="character.entrance" value="pop_in">
+        </label>
+        <label>Gesture
+          <input name="character.gesture" value="shrug_and_point">
+        </label>
+      </fieldset>
+
+      <fieldset>
+        <legend>Dialogue</legend>
+        <label>Text
+          <textarea name="dialogue.text" rows="3">Every landlord knows real estate isn't passive.</textarea>
+        </label>
+        <label>Voice
+          <input name="dialogue.voice" value="local_voice_01">
+        </label>
+        <label>Lip sync
+          <input name="dialogue.lip_sync" value="rhubarb">
+        </label>
+      </fieldset>
+
+      <fieldset>
+        <legend>Branding</legend>
+        <label>Logo path
+          <input name="branding.logo" value="assets/logo.svg" spellcheck="false">
+        </label>
+        <label>Caption style
+          <input name="branding.caption_style" value="lower_third">
+        </label>
+      </fieldset>
+
+      <fieldset>
+        <legend>Output</legend>
+        <label>Resolution (WIDTHxHEIGHT)
+          <input name="output.resolution" value="1920x1080" spellcheck="false">
+        </label>
+        <label>FPS (integer)
+          <input name="output.fps" value="30" inputmode="numeric">
+        </label>
+        <label>Format
+          <input name="output.format" value="mp4" spellcheck="false">
+        </label>
+      </fieldset>
+
+      <div class="actions">
+        <button type="submit">Generate spec</button>
+        <a id="download-link" class="button" href="/api/spec/download" hidden>Download scene JSON</a>
+      </div>
+    </form>
+
+    <section id="result" class="panel" hidden>
+      <h2>Generated spec</h2>
+      <div id="plan-summary" class="plan-summary"></div>
+      <pre id="spec-json" class="spec-json" tabindex="0"></pre>
+    </section>
+
+    <section id="error" class="panel error" role="alert" hidden></section>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>
