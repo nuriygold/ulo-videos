@@ -8,6 +8,7 @@ or handler mocks.
 import hashlib
 import json
 import shutil
+import socket
 import tempfile
 import threading
 import unittest
@@ -77,6 +78,19 @@ class ProjectStorageTests(unittest.TestCase):
             "C:drive.mp4",
             "C:\\abs.mp4",
             "nul\x00.mp4",
+        ):
+            with self.subTest(name=name):
+                with self.assertRaises(projects.InvalidFilenameError):
+                    projects.store_upload(self.root, name, b"bytes")
+        self.assertFalse((self.root / "assets").exists())
+
+    def test_rejects_control_characters_in_filenames(self):
+        for name in (
+            "bad\nname.mp4",
+            "bad\tname.mp4",
+            "bad\rname.mp4",
+            "\x01clip.mp4",
+            "clip\x1f.mp4",
         ):
             with self.subTest(name=name):
                 with self.assertRaises(projects.InvalidFilenameError):
@@ -172,6 +186,97 @@ class ProjectStorageTests(unittest.TestCase):
 
         self.assertEqual(projects.read_manifest(self.root), {"assets": []})
 
+    def test_unreadable_manifest_fails_the_upload_without_writing_the_asset(self):
+        (self.root / "assets").mkdir()
+        (self.root / "assets" / "manifest.json").write_text(
+            "{not json", encoding="utf-8"
+        )
+
+        with self.assertRaises(projects.ManifestError):
+            projects.store_upload(self.root, "a.mp4", b"bytes")
+
+        self.assertEqual(
+            [path.name for path in (self.root / "assets").iterdir()],
+            ["manifest.json"],
+        )
+
+    def test_unwritable_project_raises_a_named_storage_error(self):
+        (self.root / "assets").mkdir()
+        (self.root / "assets").chmod(0o555)
+        self.addCleanup((self.root / "assets").chmod, 0o755)
+
+        with self.assertRaises(projects.ProjectStorageError) as raised:
+            projects.store_upload(self.root, "a.mp4", b"bytes")
+
+        self.assertIn("a.mp4", str(raised.exception))
+
+    def test_concurrent_uploads_keep_every_entry_and_a_distinct_name(self):
+        uploaders = 8
+        start = threading.Barrier(uploaders)
+        results = []
+        errors = []
+
+        def upload():
+            try:
+                start.wait(timeout=10)
+                results.append(projects.store_upload(self.root, "race.mp4", b"race"))
+            except Exception as error:  # surfaced below, never swallowed
+                errors.append(error)
+
+        threads = [threading.Thread(target=upload) for _ in range(uploaders)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=10)
+
+        self.assertEqual(errors, [])
+        names = sorted(entry["filename"] for _, entry in results)
+        self.assertEqual(len(set(names)), uploaders)
+        self.assertEqual(
+            names,
+            sorted(
+                entry["filename"]
+                for entry in projects.read_manifest(self.root)["assets"]
+            ),
+        )
+        for name in names:
+            self.assertTrue((self.root / "assets" / name).is_file())
+
+    def test_manifest_reads_never_observe_a_partial_write(self):
+        uploaders = 8
+        start = threading.Barrier(uploaders)
+        stop = threading.Event()
+        torn_reads = []
+
+        def read_manifest_until_stopped():
+            path = self.root / "assets" / "manifest.json"
+            while not stop.is_set():
+                try:
+                    text = path.read_text(encoding="utf-8")
+                except FileNotFoundError:
+                    continue
+                try:
+                    json.loads(text)
+                except ValueError:
+                    torn_reads.append(text)
+
+        reader = threading.Thread(target=read_manifest_until_stopped, daemon=True)
+        reader.start()
+
+        def upload():
+            start.wait(timeout=10)
+            projects.store_upload(self.root, "race.mp4", b"race")
+
+        threads = [threading.Thread(target=upload) for _ in range(uploaders)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=10)
+        stop.set()
+        reader.join(timeout=10)
+
+        self.assertEqual(torn_reads, [])
+
     def test_assets_symlink_escaping_the_root_is_rejected(self):
         outside = Path(tempfile.mkdtemp(prefix="prompt-to-shot-outside-")).resolve()
         self.addCleanup(shutil.rmtree, outside, ignore_errors=True)
@@ -210,6 +315,25 @@ class UploadApiTests(unittest.TestCase):
     def upload(self, name, data=b"x"):
         quoted = urllib.parse.quote(name, safe="")
         return self.request(f"/api/upload?filename={quoted}", method="POST", data=data)
+
+    def raw_request(self, method, path, *, headers=None, body=b""):
+        """Send a hand-built HTTP/1.0 request so malformed framing is possible."""
+        lines = [f"{method} {path} HTTP/1.0", "Host: 127.0.0.1"]
+        lines.extend(f"{name}: {value}" for name, value in (headers or {}).items())
+        payload = ("\r\n".join(lines) + "\r\n\r\n").encode("utf-8") + body
+        port = urllib.parse.urlsplit(self.base_url).port
+        with socket.create_connection(("127.0.0.1", port), timeout=5) as connection:
+            connection.sendall(payload)
+            connection.shutdown(socket.SHUT_WR)
+            chunks = []
+            while True:
+                chunk = connection.recv(4096)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+        head, _, body_bytes = b"".join(chunks).partition(b"\r\n\r\n")
+        status_line = head.split(b"\r\n", 1)[0]
+        return int(status_line.split()[1]), body_bytes
 
     def test_upload_stores_the_file_and_returns_path_and_entry(self):
         status, headers, body = self.upload("logo.svg", b"<svg/>")
@@ -257,8 +381,17 @@ class UploadApiTests(unittest.TestCase):
 
         self.assertEqual(status, 400)
 
+    def test_upload_with_a_duplicate_filename_parameter_returns_400(self):
+        status, _, body = self.request(
+            "/api/upload?filename=a.mp4&filename=b.mp4", method="POST", data=b"x"
+        )
+
+        self.assertEqual(status, 400)
+        self.assertIn("filename", json.loads(body)["error"])
+        self.assertFalse((self.project_root / "assets").exists())
+
     def test_upload_with_unsafe_filenames_returns_400(self):
-        for name in ("../escape.mp4", "a/b.mp4", ".."):
+        for name in ("../escape.mp4", "a/b.mp4", "..", "bad\nname.mp4", "bad\tname.mp4"):
             with self.subTest(name=name):
                 status, _, body = self.upload(name)
 
@@ -275,6 +408,40 @@ class UploadApiTests(unittest.TestCase):
         status, _, body = self.upload("a.mp4", b"")
 
         self.assertEqual(status, 400)
+
+    def test_upload_with_an_invalid_content_length_returns_400(self):
+        status, body = self.raw_request(
+            "POST",
+            "/api/upload?filename=a.mp4",
+            headers={"Content-Length": "abc"},
+            body=b"x",
+        )
+
+        self.assertEqual(status, 400)
+        self.assertIn("Content-Length", json.loads(body)["error"])
+        self.assertFalse((self.project_root / "assets").exists())
+
+    def test_upload_with_a_short_body_returns_400(self):
+        status, body = self.raw_request(
+            "POST",
+            "/api/upload?filename=a.mp4",
+            headers={"Content-Length": "10"},
+            body=b"four",
+        )
+
+        self.assertEqual(status, 400)
+        self.assertIn("Content-Length", json.loads(body)["error"])
+        self.assertFalse((self.project_root / "assets").exists())
+
+    def test_upload_into_an_unwritable_project_returns_500(self):
+        self.upload("a.mp4", b"one")
+        (self.project_root / "assets").chmod(0o555)
+        self.addCleanup((self.project_root / "assets").chmod, 0o755)
+
+        status, _, body = self.upload("b.png", b"two")
+
+        self.assertEqual(status, 500)
+        self.assertIn("b.png", json.loads(body)["error"])
 
     def test_upload_over_the_limit_returns_413_without_writing(self):
         with mock.patch.object(projects, "MAX_UPLOAD_BYTES", 4):

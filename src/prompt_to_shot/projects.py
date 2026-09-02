@@ -5,13 +5,17 @@ project's `assets/` directory with a collision-safe stored name, and records
 the asset in `assets/manifest.json` using the repository's canonical JSON
 convention. Manifest updates are read-modify-write, so entries survive
 successive uploads, and they carry no wall-clock timestamps so project
-directories stay deterministic. Path safety is delegated to
-`renderers.resolve_relative_path`; uploads never write outside the project
-root.
+directories stay deterministic. The whole store sequence runs under a module
+lock, and manifest writes go through a temp file and `os.replace`, so threaded
+servers cannot interleave two uploads or observe a partial manifest. Path
+safety is delegated to `renderers.resolve_relative_path`; uploads never write
+outside the project root.
 """
 
 import hashlib
 import json
+import os
+import threading
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from .renderers import resolve_relative_path
@@ -34,6 +38,9 @@ ALLOWED_EXTENSIONS = frozenset(
         ".mp3",
     }
 )
+# Serializes each upload's name selection, file write, and manifest update;
+# projects is the only manifest writer, so a single lock is enough.
+_UPLOAD_LOCK = threading.Lock()
 
 
 class ProjectStorageError(Exception):
@@ -59,8 +66,8 @@ class ManifestError(ProjectStorageError):
 def validate_upload_filename(filename):
     """Return `filename` when it is a bare, allow-listed media filename.
 
-    Empty values, path separators, `..`, drive or absolute forms, and NUL
-    bytes raise `InvalidFilenameError`; extensions outside
+    Empty values, path separators, `..`, drive or absolute forms, and control
+    characters raise `InvalidFilenameError`; extensions outside
     `ALLOWED_EXTENSIONS` raise `UnsupportedExtensionError`. The extension
     check is case-insensitive and the caller's casing is preserved.
     """
@@ -81,8 +88,8 @@ def validate_upload_filename(filename):
         )
     if filename in (".", ".."):
         raise InvalidFilenameError(f"filename must name a file, got {filename!r}")
-    if "\x00" in filename:
-        raise InvalidFilenameError("filename must not contain NUL bytes")
+    if any(ord(char) < 0x20 for char in filename):
+        raise InvalidFilenameError("filename must not contain control characters")
     suffix = PurePosixPath(filename).suffix.lower()
     if suffix not in ALLOWED_EXTENSIONS:
         accepted = ", ".join(sorted(ALLOWED_EXTENSIONS))
@@ -133,7 +140,9 @@ def store_upload(project_root, filename, content, *, max_bytes=None):
     Returns the stored relative path in repository form (for example
     `"assets/house_leak-2.mp4"`) and the JSON-safe manifest entry. The limit
     defaults to the module-level `MAX_UPLOAD_BYTES` and can be overridden with
-    `max_bytes`.
+    `max_bytes`. The manifest is read before anything is written, and the
+    whole sequence runs under `_UPLOAD_LOCK`, so a failed upload leaves no
+    file behind and concurrent uploads cannot lose manifest entries.
     """
     validate_upload_filename(filename)
     if not isinstance(content, (bytes, bytearray)):
@@ -145,24 +154,33 @@ def store_upload(project_root, filename, content, *, max_bytes=None):
         )
     content = bytes(content)
     assets_dir = Path(project_root) / ASSETS_DIRNAME
-    stored_name = unique_asset_name(assets_dir, filename)
-    relative = f"{ASSETS_DIRNAME}/{stored_name}"
-    target = Path(resolve_relative_path(project_root, relative, "filename"))
-    assets_dir.mkdir(parents=True, exist_ok=True)
-    target.write_bytes(content)
-    entry = {
-        "filename": stored_name,
-        "original_name": filename,
-        "sha256": hashlib.sha256(content).hexdigest(),
-        "bytes": len(content),
-    }
-    manifest = read_manifest(project_root)
-    manifest["assets"].append(entry)
-    _write_manifest(project_root, manifest)
-    return relative, entry
+    with _UPLOAD_LOCK:
+        manifest = read_manifest(project_root)
+        stored_name = unique_asset_name(assets_dir, filename)
+        relative = f"{ASSETS_DIRNAME}/{stored_name}"
+        target = Path(resolve_relative_path(project_root, relative, "filename"))
+        entry = {
+            "filename": stored_name,
+            "original_name": filename,
+            "sha256": hashlib.sha256(content).hexdigest(),
+            "bytes": len(content),
+        }
+        try:
+            assets_dir.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(content)
+            manifest["assets"].append(entry)
+            _write_manifest(project_root, manifest)
+        except OSError as error:
+            raise ProjectStorageError(
+                f"could not store {relative}: {error}"
+            ) from error
+        return relative, entry
 
 
 def _write_manifest(project_root, manifest):
-    """Persist the manifest with the repository's canonical JSON convention."""
+    """Persist the manifest atomically with the repository's canonical JSON convention."""
     text = json.dumps(manifest, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
-    manifest_path(project_root).write_text(text, encoding="utf-8")
+    path = manifest_path(project_root)
+    temp = path.with_name(f".{MANIFEST_NAME}.tmp")
+    temp.write_text(text, encoding="utf-8")
+    os.replace(temp, path)

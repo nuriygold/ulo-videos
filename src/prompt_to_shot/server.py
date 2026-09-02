@@ -231,6 +231,11 @@ class PromptToShotHandler(BaseHTTPRequestHandler):
         if not names:
             self._send_json(400, {"error": "filename query parameter is required"})
             return
+        if len(names) > 1:
+            self._send_json(
+                400, {"error": "filename query parameter must be given once"}
+            )
+            return
         try:
             length = int(self.headers.get("Content-Length") or 0)
         except ValueError:
@@ -267,6 +272,8 @@ class PromptToShotHandler(BaseHTTPRequestHandler):
         except projects.UploadTooLargeError as error:
             self._send_json(413, {"error": str(error)})
         except projects.ManifestError as error:
+            self._send_json(500, {"error": str(error)})
+        except projects.ProjectStorageError as error:
             self._send_json(500, {"error": str(error)})
         except AssetPathError as error:
             self._send_json(400, {"error": str(error)})
