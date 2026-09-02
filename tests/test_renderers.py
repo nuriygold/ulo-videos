@@ -61,9 +61,9 @@ class RenderersTestCase(unittest.TestCase):
         self.touch("assets/logo.svg")
         return compile_scene(scene_payload())
 
-    def fake_toolchain(self, available=("ffmpeg", "blender")):
+    def fake_toolchain(self, available=("ffmpeg", "blender"), filter_probe=None):
         paths = {name: f"/fake/bin/{name}" for name in available}
-        return Toolchain(lookup=lambda name: paths.get(name))
+        return Toolchain(lookup=lambda name: paths.get(name), filter_probe=filter_probe)
 
 
 class ResolveRelativePathTests(RenderersTestCase):
@@ -182,6 +182,52 @@ class PlanFfmpegRenderTests(RenderersTestCase):
 
         self.assertIn("background_video", str(ctx.exception))
 
+    def test_plans_burned_in_caption_when_drawtext_is_supported(self):
+        scene = self.ready_scene()
+        chain = self.fake_toolchain(["ffmpeg"], filter_probe=lambda tool, name: True)
+
+        plan = plan_ffmpeg_render(scene, self.root, chain)
+
+        self.assertTrue(plan["captions"]["applied"])
+        self.assertIsNone(plan["captions"]["reason"])
+        filters = plan["argv"][plan["argv"].index("-vf") + 1]
+        self.assertIn(
+            r"drawtext=text=Every landlord knows real estate isn\\\'t passive."
+            r":expansion=none:x=(w-text_w)/2:y=h-th-60",
+            filters,
+        )
+
+    def test_caption_text_escapes_drawtext_special_characters(self):
+        scene = self.ready_scene()
+        scene["dialogue"]["text"] = "Isn't it: 100% \\done"
+        chain = self.fake_toolchain(["ffmpeg"], filter_probe=lambda tool, name: True)
+
+        plan = plan_ffmpeg_render(scene, self.root, chain)
+
+        filters = plan["argv"][plan["argv"].index("-vf") + 1]
+        self.assertIn(r"drawtext=text=Isn\\\'t it\\: 100% \\\\done:expansion=none", filters)
+
+    def test_keeps_metadata_only_caption_when_drawtext_is_unavailable(self):
+        scene = self.ready_scene()
+        chain = self.fake_toolchain(["ffmpeg"], filter_probe=lambda tool, name: False)
+
+        plan = plan_ffmpeg_render(scene, self.root, chain)
+
+        self.assertFalse(plan["captions"]["applied"])
+        self.assertIn("drawtext", plan["captions"]["reason"])
+        self.assertNotIn("drawtext", plan["argv"][plan["argv"].index("-vf") + 1])
+
+    def test_caption_style_none_omits_burn_in_even_when_drawtext_is_supported(self):
+        scene = self.ready_scene()
+        scene["branding"]["caption_style"] = "none"
+        chain = self.fake_toolchain(["ffmpeg"], filter_probe=lambda tool, name: True)
+
+        plan = plan_ffmpeg_render(scene, self.root, chain)
+
+        self.assertFalse(plan["captions"]["applied"])
+        self.assertIn("none", plan["captions"]["reason"])
+        self.assertNotIn("drawtext", plan["argv"][plan["argv"].index("-vf") + 1])
+
 
 class PlanBlenderRenderTests(RenderersTestCase):
     def test_plans_headless_render_command(self):
@@ -199,7 +245,10 @@ class PlanBlenderRenderTests(RenderersTestCase):
             str(self.root / "assets" / "characters" / "lizard.blend"),
         )
         self.assertIn("--factory-startup", argv)
-        self.assertTrue(plan["output"]["path"].startswith(str(self.root / "build")))
+        self.assertEqual(
+            plan["output"]["path"], str(self.root / "build" / "blender-frame0001.png")
+        )
+        self.assertEqual(argv[argv.index("-o") + 1] + "0001.png", plan["output"]["path"])
         self.assertEqual(plan, json.loads(json.dumps(plan)))
 
     def test_requires_blender_and_names_missing_tool(self):
@@ -261,6 +310,24 @@ class ToolchainTests(RenderersTestCase):
         chain = Toolchain()
 
         self.assertEqual(chain.resolve("ffmpeg"), shutil.which("ffmpeg"))
+
+    def test_filter_probe_is_injectable_and_cached(self):
+        calls = []
+
+        def probe(tool, name):
+            calls.append((tool, name))
+            return True
+
+        chain = Toolchain(lookup=lambda name: "/fake/bin/ffmpeg", filter_probe=probe)
+
+        self.assertTrue(chain.supports_filter("ffmpeg", "drawtext"))
+        self.assertTrue(chain.supports_filter("ffmpeg", "drawtext"))
+        self.assertEqual(calls, [("ffmpeg", "drawtext")])
+
+    def test_supports_filter_returns_false_without_an_executable(self):
+        chain = Toolchain(lookup=lambda name: None)
+
+        self.assertFalse(chain.supports_filter("ffmpeg", "drawtext"))
 
 
 class RunCommandTests(RenderersTestCase):

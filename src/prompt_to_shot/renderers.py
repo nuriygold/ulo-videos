@@ -7,6 +7,7 @@ without shell interpolation. Missing tools raise `MissingToolError`; missing
 asset files surface as the named plan status `missing_assets`.
 """
 
+import re
 import shutil
 import subprocess
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -17,9 +18,22 @@ DEFAULT_TOOLS = ("ffmpeg", "blender")
 PREVIEW_OUTPUT_NAME = "build/preview.mp4"
 DEFAULT_FREEZE_SECONDS = 2.0
 CAPTION_NOT_RENDERED_REASON = (
-    "burned-in captions need an FFmpeg build with drawtext/fontconfig; the "
-    "deterministic baseline renders without them and keeps dialogue.text in the plan"
+    "drawtext filter unavailable in the installed ffmpeg; dialogue.text is kept "
+    "in the plan so captions can be burned in by a capable build or adapter"
 )
+CAPTION_STYLE_NONE_REASON = (
+    "branding.caption_style is 'none'; no burned-in caption was requested"
+)
+BLENDER_CAPTION_REASON = (
+    "blender renders the character plate; captions are burned in at the ffmpeg "
+    "assembly stage"
+)
+CAPTION_POSITIONS = {
+    "lower_third": ("x=(w-text_w)/2", "y=h-th-60"),
+    "top": ("x=(w-text_w)/2", "y=60"),
+    "center": ("x=(w-text_w)/2", "y=(h-text_h)/2"),
+}
+DEFAULT_CAPTION_STYLE = "lower_third"
 _ASSET_KEYS = {
     "background_video": ("background_video",),
     "character.asset": ("character", "asset"),
@@ -46,9 +60,11 @@ class CommandTimeoutError(RendererError):
 class Toolchain:
     """Resolves local executables by name; missing tools are status, not failures."""
 
-    def __init__(self, lookup=None, tools=DEFAULT_TOOLS):
+    def __init__(self, lookup=None, tools=DEFAULT_TOOLS, filter_probe=None):
         self._lookup = lookup if lookup is not None else shutil.which
         self._tools = tuple(tools)
+        self._filter_probe = filter_probe
+        self._filter_support = {}
 
     def resolve(self, tool):
         """Return the executable path for `tool`, or None when unavailable."""
@@ -70,6 +86,37 @@ class Toolchain:
             path = self.resolve(tool)
             report[tool] = {"available": bool(path), "path": path}
         return report
+
+    def supports_filter(self, tool, filter_name):
+        """Return True when the resolved executable exposes `filter_name`.
+
+        Probing runs the executable only when this capability is queried and
+        is cached per Toolchain instance. Tests inject `filter_probe`.
+        """
+        cache_key = (str(tool), str(filter_name))
+        if cache_key not in self._filter_support:
+            self._filter_support[cache_key] = self._probe_filter(tool, filter_name)
+        return self._filter_support[cache_key]
+
+    def _probe_filter(self, tool, filter_name):
+        if self._filter_probe is not None:
+            return bool(self._filter_probe(tool, filter_name))
+        executable = self.resolve(tool)
+        if not executable:
+            return False
+        return _ffmpeg_filter_support(executable, filter_name)
+
+
+def _ffmpeg_filter_support(executable, filter_name):
+    """Probe filter support by asking the executable for its filter list."""
+    try:
+        result = run_command([str(executable), "-hide_banner", "-filters"], timeout=15)
+    except (MissingToolError, CommandTimeoutError, OSError):
+        return False
+    if result["returncode"] != 0:
+        return False
+    pattern = rf"(?m)^\s*\S+\s+{re.escape(filter_name)}\s"
+    return re.search(pattern, result["stdout"]) is not None
 
 
 def resolve_relative_path(project_root, value, field):
@@ -152,13 +199,15 @@ def plan_ffmpeg_render(
 
     Baseline: play the background video to `pause_at`, freeze on the last
     frame for `freeze_seconds`, scale to the output resolution and fps, and
-    export silently (`-an`) in the requested format. Speech and burned-in
-    captions arrive with the optional adapters in a later task.
+    export silently (`-an`) in the requested format. Burned-in captions are
+    planned when the installed ffmpeg exposes the drawtext filter; otherwise
+    the plan keeps dialogue.text as metadata with the capability reason.
     """
     _require_scene(scene)
     if isinstance(freeze_seconds, bool) or not isinstance(freeze_seconds, (int, float)) or freeze_seconds < 0:
         raise RendererError("freeze_seconds must be a non-negative number")
-    executable = _toolchain(toolchain).require("ffmpeg")
+    chain = _toolchain(toolchain)
+    executable = chain.require("ffmpeg")
     assets = _resolve_assets(scene, project_root, tuple(_ASSET_KEYS))
     output_path = resolve_relative_path(project_root, output_name, "output_name")
 
@@ -167,14 +216,26 @@ def plan_ffmpeg_render(
     width, height = _scene_value(output, "resolution")
     fps = _scene_value(output, "fps")
     fmt = _scene_value(output, "format")
-    filters = ",".join(
-        (
-            f"trim=end={_number(pause_at)}",
-            f"tpad=stop_mode=clone:stop_duration={_number(freeze_seconds)}",
-            f"scale={width}:{height}",
-            f"fps={fps}",
-        )
-    )
+    caption_style = _scene_value(_scene_value(scene, "branding"), "caption_style")
+    caption_text = _scene_value(_scene_value(scene, "dialogue"), "text")
+    if caption_style == "none":
+        captions_applied = False
+        captions_reason = CAPTION_STYLE_NONE_REASON
+    elif chain.supports_filter("ffmpeg", "drawtext"):
+        captions_applied = True
+        captions_reason = None
+    else:
+        captions_applied = False
+        captions_reason = CAPTION_NOT_RENDERED_REASON
+    filter_parts = [
+        f"trim=end={_number(pause_at)}",
+        f"tpad=stop_mode=clone:stop_duration={_number(freeze_seconds)}",
+        f"scale={width}:{height}",
+        f"fps={fps}",
+    ]
+    if captions_applied:
+        filter_parts.append(_caption_filter(caption_style, caption_text))
+    filters = ",".join(filter_parts)
     argv = [
         executable,
         "-y",
@@ -202,6 +263,8 @@ def plan_ffmpeg_render(
         argv,
         {"path": output_path, "format": str(fmt), "resolution": [width, height], "fps": fps},
         scene,
+        captions_applied,
+        captions_reason,
     )
 
 
@@ -228,8 +291,10 @@ def plan_blender_render(scene, project_root, toolchain=None):
         executable,
         assets,
         argv,
-        {"path": prefix + "-0001.png", "format": "png", "frame": 1},
+        {"path": prefix + "0001.png", "format": "png", "frame": 1},
         scene,
+        False,
+        BLENDER_CAPTION_REASON,
     )
 
 
@@ -272,7 +337,7 @@ def _number(value):
     return f"{float(value):.6f}".rstrip("0").rstrip(".") or "0"
 
 
-def _finish_plan(tool, executable, assets, argv, output, scene):
+def _finish_plan(tool, executable, assets, argv, output, scene, captions_applied, captions_reason):
     missing = _missing_assets(assets)
     dialogue = _scene_value(scene, "dialogue")
     branding = _scene_value(scene, "branding")
@@ -287,7 +352,27 @@ def _finish_plan(tool, executable, assets, argv, output, scene):
         "captions": {
             "text": _scene_value(dialogue, "text"),
             "style": _scene_value(branding, "caption_style"),
-            "applied": False,
-            "reason": CAPTION_NOT_RENDERED_REASON,
+            "applied": captions_applied,
+            "reason": captions_reason,
         },
     }
+
+
+def _escape_drawtext_text(text):
+    """Escape caption text for a drawtext option inside a filtergraph.
+
+    Two escaping levels apply (ffmpeg-utils "Notes on filtergraph escaping"):
+    the option level escapes ':', quotes, and backslashes; the filtergraph
+    level escapes the remaining ',', ';', and bracket separators. Newlines
+    are flattened because the option value is a single argv element, and
+    `expansion=none` keeps '%' literal.
+    """
+    flat = text.replace("\r", " ").replace("\n", " ")
+    option_level = flat.replace("\\", "\\\\").replace("'", "\\'").replace(":", "\\:")
+    return option_level.replace("\\", "\\\\").replace("'", "\\'").replace(",", "\\,")
+
+
+def _caption_filter(caption_style, dialogue_text):
+    position_x, position_y = CAPTION_POSITIONS.get(caption_style, CAPTION_POSITIONS[DEFAULT_CAPTION_STYLE])
+    text = _escape_drawtext_text(dialogue_text)
+    return f"drawtext=text={text}:expansion=none:{position_x}:{position_y}"
