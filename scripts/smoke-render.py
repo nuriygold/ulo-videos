@@ -33,6 +33,9 @@ render produced a valid artifact; any failure exits non-zero.
 Usage:
     python3 scripts/smoke-render.py
     python3 scripts/smoke-render.py --build-dir /tmp/smoke
+
+The default build directory `<repo>/build` is gitignored; a `--build-dir`
+override is not, so the smoke-project/ outputs land in that directory.
 """
 
 import argparse
@@ -441,7 +444,12 @@ def parse_args(argv):
     parser.add_argument(
         "--build-dir",
         default=str(REPO_ROOT / "build"),
-        help="gitignored build directory (default: <repo>/build)",
+        help=(
+            "build directory for the throwaway smoke project "
+            "(default: <repo>/build, which is gitignored; a non-default "
+            "directory is not gitignored and the smoke-project/ outputs "
+            "land there)"
+        ),
     )
     return parser.parse_args(argv)
 
