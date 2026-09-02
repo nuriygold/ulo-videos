@@ -7,7 +7,9 @@ values (resolution string, numeric strings) and lets
 `POST /api/spec` returns the compiled scene plus the planned FFmpeg preview
 command; toolchain availability is displayed status (`GET /api/tools`), never
 a request failure. The generated spec is downloadable, in the repository's
-canonical JSON form, at `GET /api/spec/download`.
+canonical JSON form, at `GET /api/spec/download`. Media assets are uploaded as
+raw bytes to `POST /api/upload?filename=NAME`; storage rules live in
+`projects`, and the server only maps storage errors to HTTP statuses.
 """
 
 import argparse
@@ -16,8 +18,9 @@ import re
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
+from . import projects
 from .renderers import (
     AssetPathError,
     MissingToolError,
@@ -118,7 +121,7 @@ class PromptToShotHTTPServer(ThreadingHTTPServer):
 
 
 class PromptToShotHandler(BaseHTTPRequestHandler):
-    """Serves the static browser form and the scene JSON API."""
+    """Serves the static browser form, the scene JSON API, and uploads."""
 
     def do_GET(self):
         self._dispatch("GET")
@@ -160,6 +163,11 @@ class PromptToShotHandler(BaseHTTPRequestHandler):
         elif path == "/api/spec":
             if method == "POST":
                 self._handle_spec_post()
+            else:
+                self._method_not_allowed(method, path)
+        elif path == "/api/upload":
+            if method == "POST":
+                self._handle_upload_post()
             else:
                 self._method_not_allowed(method, path)
         else:
@@ -215,6 +223,55 @@ class PromptToShotHandler(BaseHTTPRequestHandler):
             plan_error = None
         self.server.last_scene_text = serialize_scene(scene)
         self._send_json(200, {"scene": scene, "plan": plan, "plan_error": plan_error})
+
+    def _handle_upload_post(self):
+        """Store the raw request body as a project asset and update the manifest."""
+        query = parse_qs(urlsplit(self.path).query)
+        names = query.get("filename")
+        if not names:
+            self._send_json(400, {"error": "filename query parameter is required"})
+            return
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            self._send_json(400, {"error": "invalid Content-Length header"})
+            return
+        if length > projects.MAX_UPLOAD_BYTES:
+            self._send_json(
+                413,
+                {
+                    "error": (
+                        "upload body too large; the limit is "
+                        f"{projects.MAX_UPLOAD_BYTES} bytes"
+                    )
+                },
+            )
+            return
+        raw = self.rfile.read(length) if length > 0 else b""
+        if not raw:
+            self._send_json(400, {"error": "upload body must contain the file bytes"})
+            return
+        if len(raw) != length:
+            self._send_json(
+                400, {"error": "request body ended before Content-Length bytes"}
+            )
+            return
+        try:
+            relative, entry = projects.store_upload(
+                self.server.project_root, names[0], raw
+            )
+        except projects.InvalidFilenameError as error:
+            self._send_json(400, {"error": str(error)})
+        except projects.UnsupportedExtensionError as error:
+            self._send_json(415, {"error": str(error)})
+        except projects.UploadTooLargeError as error:
+            self._send_json(413, {"error": str(error)})
+        except projects.ManifestError as error:
+            self._send_json(500, {"error": str(error)})
+        except AssetPathError as error:
+            self._send_json(400, {"error": str(error)})
+        else:
+            self._send_json(200, {"path": relative, "entry": entry})
 
     def _method_not_allowed(self, method, path):
         self._send_json(405, {"error": f"method not allowed: {method} {path}"})
