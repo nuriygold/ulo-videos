@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { buildInterruptionScene, createProject, loadDemoFile, saveShot, submitRender, uploadAsset, type InterruptionDraft } from "../src/web/workspace-client";
+import { buildInterruptionScene, createProject, listRenderJobs, loadDemoFile, saveShot, submitRender, uploadAsset, type InterruptionDraft } from "../src/web/workspace-client";
 
 const initialDraft: InterruptionDraft = { shotName: "Opening interruption", sourceVideo: "", pauseAt: "7.4", characterAsset: "", position: "foreground_right", entrance: "slide_left", gesture: "shrug_and_point", dialogueText: "Wait — there is a clearer way.", voice: "alloy", lipSync: "rhubarb", captionsEnabled: true, captionStyle: "lower_third", logo: "", width: "1920", height: "1080", fps: "30" };
 type Project = { id: string; name: string; workspaceId: string }; type Shot = { id: string; name: string }; type Job = { id: string; status: string; progress: number; output_url?: string; error_message?: string };
@@ -58,9 +58,21 @@ export default function Home() {
   }
   async function onRender() {
     if (!project || !shot) return; setBusy("render"); setError("");
-    try { const nextJob = await submitRender(project.id, shot.id, buildInterruptionScene(draft)); setJob(nextJob); setHistory((items) => [nextJob, ...items]); setNotice("Render accepted by the control plane."); }
+    try { const nextJob = await submitRender(project.id, shot.id, buildInterruptionScene(draft)); setJob(nextJob); setHistory((items) => [nextJob, ...items.filter((item) => item.id !== nextJob.id)]); setNotice(nextJob.output_url ? "Render completed. Your MP4 is ready below." : "Render accepted. Waiting for the cloud worker to finish…"); if (nextJob.status !== "completed" && nextJob.status !== "failed") void monitorRender(project.id, nextJob.id); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "Render could not be submitted."); }
     finally { setBusy(null); }
+  }
+  async function monitorRender(projectId: string, jobId: string) {
+    for (let attempt = 0; attempt < 60; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      try {
+        const latest = (await listRenderJobs(projectId)).find((item) => item.id === jobId);
+        if (!latest) continue;
+        setJob(latest); setHistory((items) => [latest, ...items.filter((item) => item.id !== jobId)]);
+        if (latest.status === "completed") { setNotice("Render completed. Your MP4 is ready below."); return; }
+        if (latest.status === "failed") { setNotice("Render failed. Review the error details and try again."); return; }
+      } catch { /* Keep polling; transient status reads should not hide the active job. */ }
+    }
   }
 
   return <main className="workspace">
@@ -78,7 +90,7 @@ export default function Home() {
           <div className="actions"><button disabled={!project || busy !== null}>{busy === "shot" ? "Saving…" : shot ? "Shot saved" : "Save shot"}</button><button type="button" className="secondary" onClick={onRender} disabled={!shot || busy !== null}>{busy === "render" ? "Submitting…" : "Submit render"}</button></div>
         </form><div className={`notice ${error ? "error" : ""}`} role="status" aria-live="polite">{error || notice}</div>
       </section>
-      <aside className="rail"><section className="status-card"><p className="eyebrow">Flow status</p><ol><li className={project?"done":"current"}>Project {project?.name || "not created"}</li><li className={shot?"done":project?"current":""}>Shot {shot?.name || "not saved"}</li><li className={job?"done":shot?"current":""}>Render {job ? `${job.status} · ${job.id}` : "not submitted"}</li></ol>{job ? <p className="job-note">Latest: <strong>{job.status}</strong> ({job.progress}%). {job.output_url ? <a href={job.output_url} target="_blank" rel="noreferrer">Open MP4</a> : null}</p>:null}{history.length>0&&<div className="history"><strong>Render history</strong>{history.slice(0,5).map((item)=><div key={item.id}>{item.id} · {item.status} · {item.progress}% {item.output_url ? <a href={item.output_url} target="_blank" rel="noreferrer">MP4</a> : null}</div>)}</div>}</section>
+      <aside className="rail"><section className="status-card"><p className="eyebrow">Flow status</p><ol><li className={project?"done":"current"}>Project {project?.name || "not created"}</li><li className={shot?"done":project?"current":""}>Shot {shot?.name || "not saved"}</li><li className={job?"done":shot?"current":""}>Render {job ? `${job.status} · ${job.id}` : "not submitted"}</li></ol>{job ? <p className="job-note">Latest: <strong>{job.status}</strong> ({job.progress}%). {job.output_url ? <a href={job.output_url} target="_blank" rel="noreferrer">Open MP4</a> : null}</p>:null}{job?.output_url ? <div className="output-card"><p className="eyebrow">Finished video</p><video className="output-video" controls preload="metadata" src={job.output_url}>Your browser does not support video playback.</video><a href={job.output_url} target="_blank" rel="noreferrer">Open or download MP4</a></div> : null}{history.length>0&&<div className="history"><strong>Render history</strong>{history.slice(0,5).map((item)=><div key={item.id}>{item.id} · {item.status} · {item.progress}% {item.output_url ? <a href={item.output_url} target="_blank" rel="noreferrer">MP4</a> : null}</div>)}</div>}</section>
       <section className="setup-card"><p className="eyebrow">Cloud renderer</p><h2>{setup?.ready ? "Ready to render" : "Deployment status"}</h2><p>{setup?.ready ? "All production services are connected. Save a shot, then submit it for cloud rendering." : "The editor is available, but rendering is waiting on deployment configuration."}</p><ul>{[["Blob","Media storage",setup?.services.blob], ["Supabase","Projects, shots, and render jobs",setup?.services.supabase], ["Queue","Job dispatch",setup?.services.queue], ["Worker","FFmpeg render execution",setup?.services.worker]].map(([name, description, connected]) => <li key={String(name)} className={connected ? "connected" : "missing"}><strong>{connected ? "✓" : "!"} {name}</strong><span>{connected ? `${description} connected` : `${description} is not configured`}</span></li>)}</ul>{setup?.ready ? <p className="setup-foot">Production is configured. The first worker pass renders the deterministic FFmpeg baseline; Blender, Piper, and Rhubarb stages can be added next.</p> : <p className="setup-foot">An administrator must configure the missing service before rendering can start.</p>}</section></aside>
     </div>
   </main>;

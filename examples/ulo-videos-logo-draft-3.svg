@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 180" role="img" aria-labelledby="title desc">
+  <title id="title">ulo-videos logo draft 3</title>
+  <desc id="desc">Compact sage badge with a forest play triangle and ulo-videos wordmark.</desc>
+  <g transform="translate(20 24)">
+    <circle cx="66" cy="66" r="66" fill="#dcebe3"/>
+    <circle cx="66" cy="66" r="47" fill="#23664f"/>
+    <path d="M57 43v37c0 13 8 22 19 22s19-9 19-22V43" fill="none" stroke="#f3f0e8" stroke-width="11" stroke-linecap="round"/>
+    <path d="m82 61 24 14-24 14z" fill="#d79b2b"/>
+  </g>
+  <text x="180" y="109" fill="#18201e" font-family="Arial, Helvetica, sans-serif" font-size="67" font-weight="700" letter-spacing="-2.5">ulo-videos</text>
+  <text x="185" y="139" fill="#65706c" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="700" letter-spacing="3">MAKE THE MOMENT LAND</text>
+</svg>

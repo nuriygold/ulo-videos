@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 180" role="img" aria-labelledby="title desc">
+  <title id="title">ulo-videos logo draft 2</title>
+  <desc id="desc">Editorial ulo-videos wordmark with a gold playback dot.</desc>
+  <circle cx="52" cy="90" r="25" fill="#d79b2b"/>
+  <path d="M45 78v24c0 12 6 19 15 19s15-7 15-19V78" fill="none" stroke="#23664f" stroke-width="9" stroke-linecap="round"/>
+  <text x="108" y="112" fill="#18201e" font-family="Georgia, 'Times New Roman', serif" font-size="76" font-weight="700" letter-spacing="-4">ulo</text>
+  <text x="270" y="112" fill="#23664f" font-family="Arial, Helvetica, sans-serif" font-size="71" font-weight="600" letter-spacing="-3">-videos</text>
+  <rect x="108" y="132" width="445" height="4" rx="2" fill="#dcebe3"/>
+</svg>

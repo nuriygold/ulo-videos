@@ -54,6 +54,9 @@ fieldset > label { margin-bottom: 12px; }
 .status-card li.current { border-color: #d79b2b; color: var(--ink); }
 .status-card li.done { border-color: var(--accent); color: var(--ink); }
 .job-note, .setup-foot { font-size: 12px; color: var(--muted); margin: 16px 0 0; }
+.output-card { display: grid; gap: 8px; margin-top: 18px; }
+.output-card .eyebrow { margin: 0; }
+.output-video { display: block; width: 100%; border-radius: 8px; background: #18201e; }
 .setup-card h2 { margin-top: 6px; }
 .setup-card ul { list-style: none; padding: 0; margin: 20px 0 0; display: grid; gap: 17px; }
 .setup-card li { display: grid; gap: 3px; }

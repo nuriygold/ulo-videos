@@ -28,7 +28,9 @@ export async function POST(request: Request) {
     if (!shot) return NextResponse.json({ error: "shot not found in this workspace" }, { status: 404 });
     const job = await submitRenderJob({ id: `rj_${randomUUID()}`, workspaceId, projectId: body.projectId, shotId: body.shotId, template: shot.template, templateVersion: shot.templateVersion, specSnapshot: shot.spec }, { create: (value) => store.createRenderJob(value), get: (id) => store.getRenderJob(id, workspaceId) as any, update: (id, update) => store.updateRenderJob(id, { status: update.status, progress: update.progress, error_code: update.errorCode, error_message: update.errorMessage, completed_at: new Date().toISOString() }) }, { publish: async (message) => { const queueUrl = process.env.RENDER_QUEUE_URL; if (!queueUrl) throw new Error("render queue is not configured"); const response = await fetch(queueUrl, { method: "POST", headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.RENDER_WORKER_SECRET || ""}` }, body: JSON.stringify(message) }); if (!response.ok) throw new Error(`render queue rejected the job (${response.status})`); } });
     const current = await store.getRenderJob(job.id, workspaceId);
-    const response = NextResponse.json({ accepted: true, job: current ?? job }, { status: 202 });
+    const visibleJobs = await store.listRenderJobs(workspaceId, body.projectId);
+    const visibleJob = visibleJobs.find((item) => item.id === job.id);
+    const response = NextResponse.json({ accepted: true, job: visibleJob ?? current ?? job }, { status: 202 });
     if (!existing) response.cookies.set(WORKSPACE_COOKIE, workspaceId, { httpOnly: true, sameSite: "lax", secure: true, maxAge: 60 * 60 * 24 * 30, path: "/" });
     return response;
   } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "cloud render submission is not configured" }, { status: 503 }); }
