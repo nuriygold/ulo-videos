@@ -24,7 +24,7 @@ const UPLOAD_POLICIES: Record<BrowserUploadRole, AssetUploadPolicy> = {
     maximumSizeInBytes: 5 * GIB,
   },
   character: {
-    allowedContentTypes: ["application/x-blender", "application/octet-stream"],
+    allowedContentTypes: ["application/x-blender"],
     maximumSizeInBytes: 2 * GIB,
   },
   logo: {
@@ -69,6 +69,12 @@ function safeFilename(value: unknown): string {
   return normalized;
 }
 
+function validateFilenameForRole(role: BrowserUploadRole, filename: string): void {
+  if (role === "character" && !filename.toLowerCase().endsWith(".blend")) {
+    throw new Error("character assets must use a .blend filename");
+  }
+}
+
 export function uploadPolicyForRole(role: AssetRole): AssetUploadPolicy {
   if (role === "render_output") {
     throw new Error("render_output is worker-only and cannot be uploaded from a browser");
@@ -86,7 +92,9 @@ export function buildAssetBlobKey(intent: AssetUploadIntent): string {
     : "workspace-assets";
   const assetId = requireScopeId(intent.assetId, "assetId");
   uploadPolicyForRole(intent.role);
-  return `workspaces/${workspaceId}/${projectScope}/${intent.role}/${assetId}/${safeFilename(intent.filename)}`;
+  const filename = safeFilename(intent.filename);
+  validateFilenameForRole(intent.role, filename);
+  return `workspaces/${workspaceId}/${projectScope}/${intent.role}/${assetId}/${filename}`;
 }
 
 export function parseAssetUploadIntent(payload: string | null): AssetUploadIntent {
@@ -115,7 +123,33 @@ export function parseAssetUploadIntent(payload: string | null): AssetUploadInten
   if (input.projectId !== undefined && input.projectId !== null) {
     parsed.projectId = requireScopeId(input.projectId, "projectId");
   }
+  buildAssetBlobKey(parsed);
   return parsed;
+}
+
+export async function authorizeAssetUpload(input: {
+  requestWorkspaceId: string | undefined;
+  pathname: string;
+  clientPayload: string | null;
+  projectBelongsToWorkspace?: (projectId: string, workspaceId: string) => Promise<boolean>;
+}): Promise<{ intent: AssetUploadIntent; policy: AssetUploadPolicy }> {
+  if (!input.requestWorkspaceId) {
+    throw new Error("an anonymous workspace must be established before uploading assets");
+  }
+  const intent = parseAssetUploadIntent(input.clientPayload);
+  if (intent.workspaceId !== input.requestWorkspaceId) {
+    throw new Error("the upload workspace does not match this browser workspace");
+  }
+  if (intent.projectId) {
+    if (!input.projectBelongsToWorkspace) throw new Error("project ownership cannot be verified");
+    if (!await input.projectBelongsToWorkspace(intent.projectId, input.requestWorkspaceId)) {
+      throw new Error("the upload project does not belong to this browser workspace");
+    }
+  }
+  if (input.pathname !== buildAssetBlobKey(intent)) {
+    throw new Error("the requested pathname does not match the scoped asset key");
+  }
+  return { intent, policy: uploadPolicyForRole(intent.role) };
 }
 
 export function assetRecordFromUpload(input: {

@@ -4,9 +4,8 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import {
   assetRecordFromUpload,
-  buildAssetBlobKey,
+  authorizeAssetUpload,
   parseAssetUploadIntent,
-  uploadPolicyForRole,
 } from "../../../../src/web/asset-upload";
 import { WORKSPACE_COOKIE } from "../../../../src/web/anonymous-workspace";
 import { getSupabaseStore } from "../../../../src/web/supabase-store";
@@ -30,17 +29,12 @@ export async function POST(request: Request) {
         if (!requestWorkspaceId) {
           throw new Error("an anonymous workspace must be established before uploading assets");
         }
-        const intent = parseAssetUploadIntent(clientPayload);
-        if (intent.workspaceId !== requestWorkspaceId) {
-          throw new Error("the upload workspace does not match this browser workspace");
-        }
-        if (intent.projectId && !await store.projectBelongsToWorkspace(intent.projectId, requestWorkspaceId)) {
-          throw new Error("the upload project does not belong to this browser workspace");
-        }
-        if (pathname !== buildAssetBlobKey(intent)) {
-          throw new Error("the requested pathname does not match the scoped asset key");
-        }
-        const policy = uploadPolicyForRole(intent.role);
+        const { intent, policy } = await authorizeAssetUpload({
+          requestWorkspaceId,
+          pathname,
+          clientPayload,
+          projectBelongsToWorkspace: (projectId, workspaceId) => store.projectBelongsToWorkspace(projectId, workspaceId),
+        });
         return {
           allowedContentTypes: [...policy.allowedContentTypes],
           maximumSizeInBytes: policy.maximumSizeInBytes,

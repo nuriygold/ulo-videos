@@ -28,7 +28,7 @@ export class SupabaseControlPlaneStore implements ControlPlaneStore {
   }
 
   async saveAsset(input: AssetRecord) {
-    const { error } = await this.client.from("assets").upsert({
+    const { error } = await this.client.from("assets").insert({
       id: input.id,
       workspace_id: input.workspaceId,
       project_id: input.projectId ?? null,

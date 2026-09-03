@@ -14,6 +14,7 @@ export interface ControlPlaneStore {
   createWorkspace(id: string): Promise<void>;
   createProject(input: { id: string; workspaceId: string; name: string }): Promise<void>;
   projectBelongsToWorkspace(projectId: string, workspaceId: string): Promise<boolean>;
+  /** Insert an immutable asset claim; duplicate IDs must be rejected. */
   saveAsset(input: AssetRecord): Promise<void>;
   saveShot(input: { id: string; projectId: string; name: string; template: string; templateVersion: number; spec: Record<string, unknown> }): Promise<void>;
   createRenderJob(input: { id: string; workspaceId: string; projectId: string; shotId: string; template: string; templateVersion: number; specSnapshot: Record<string, unknown> }): Promise<void>;
