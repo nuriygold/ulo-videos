@@ -11,6 +11,10 @@ from pathlib import Path
 from urllib.request import Request, urlopen
 
 
+def download_request(url):
+    return Request(url, headers={"User-Agent": "ulo-videos-render-worker/1.0"})
+
+
 def queue_message(raw_body, authorization, expected_secret):
     if not expected_secret or authorization != f"Bearer {expected_secret}":
         raise PermissionError("worker authorization required")
@@ -101,7 +105,7 @@ def render_cloud_job(job_id, callback_origin):
     try:
         _update_job(job_id, status="preparing", progress=5)
         _update_job(job_id, status="downloading_assets", progress=15)
-        with urlopen(source_url, timeout=120) as response, source.open("wb") as destination:
+        with urlopen(download_request(source_url), timeout=120) as response, source.open("wb") as destination:
             shutil.copyfileobj(response, destination)
         _update_job(job_id, status="rendering", progress=45)
         command = ffmpeg_command(str(source), str(rendered), scene["trigger"]["value"], scene["output"]["width"], scene["output"]["height"], scene["output"]["fps"])

@@ -1,7 +1,7 @@
 import json
 import unittest
 
-from ulo_videos.cloud_worker import queue_message, ffmpeg_command
+from ulo_videos.cloud_worker import download_request, queue_message, ffmpeg_command
 
 
 class CloudWorkerContractTests(unittest.TestCase):
@@ -17,6 +17,9 @@ class CloudWorkerContractTests(unittest.TestCase):
         self.assertEqual(command[0], "ffmpeg")
         self.assertTrue(any("trim=end=7.4" in item for item in command))
         self.assertEqual(command[-1], "/tmp/output.mp4")
+
+    def test_source_download_uses_a_browser_compatible_user_agent(self):
+        self.assertEqual(download_request("https://example.test/video.mp4").get_header("User-agent"), "ulo-videos-render-worker/1.0")
 
 
 if __name__ == "__main__":
