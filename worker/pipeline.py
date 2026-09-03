@@ -10,6 +10,10 @@ HOLD_SECONDS = 2
 FONT_FILE = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 
 
+class UnsupportedPerformanceError(ValueError):
+    """Raised before rendering when a scene asks for unavailable speech stages."""
+
+
 @dataclass(frozen=True)
 class CompositePlan:
     source_url: str
@@ -54,9 +58,9 @@ def _ffmpeg_text(value: str) -> str:
 
 def _character_position(position: str) -> tuple[str, str]:
     positions = {
-        "foreground_left": ("64", "H-h-80"),
-        "foreground_center": ("(W-w)/2", "H-h-80"),
-        "foreground_right": ("W-w-64", "H-h-80"),
+        "foreground_left": ("0", "0"),
+        "foreground_center": ("0", "0"),
+        "foreground_right": ("0", "0"),
     }
     try:
         return positions[position]
@@ -90,6 +94,10 @@ def build_composite_plan(scene: dict, workdir: Union[str, Path]) -> CompositePla
     gesture = _text((character.get("performance") or {}).get("gesture"), "character.performance.gesture")
     dialogue = character.get("dialogue") or {}
     caption_text = _text(dialogue.get("text"), "character.dialogue.text")
+    if any(isinstance(dialogue.get(field), str) and dialogue[field].strip() for field in ("voice", "lip_sync")):
+        raise UnsupportedPerformanceError(
+            "unsupported_performance: voice and lip_sync require installed Piper, Rhubarb, and a configured voice asset"
+        )
     captions = scene.get("captions") or {}
     caption_style = captions.get("style") if captions.get("enabled") else "none"
     if caption_style not in {"none", "lower_third", "top", "center"}:
@@ -112,25 +120,29 @@ def build_composite_plan(scene: dict, workdir: Union[str, Path]) -> CompositePla
     ]
     before = f"[before_source]trim=end={trigger},setpts=PTS-STARTPTS[before]"
     after = f"[after_source]trim=start={trigger},setpts=PTS-STARTPTS[after]"
-    hold = f"[before]tpad=stop_mode=clone:stop_duration={HOLD_SECONDS}[hold]"
+    hold = (
+        f"[freeze_source]trim=end={trigger},reverse,trim=end={1 / fps},reverse,"
+        f"setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration={HOLD_SECONDS}[hold]"
+    )
     caption_filter = ""
     if caption_style != "none":
         caption_y = {"lower_third": "h-th-60", "top": "60", "center": "(h-th)/2"}[caption_style]
-        caption_filter = f",drawtext=text='{_ffmpeg_text(caption_text)}':fontfile='{FONT_FILE}':x=(w-text_w)/2:y={caption_y}:fontcolor=white:fontsize=48:box=1:boxcolor=black@0.65:boxborderw=22"
+        caption_filter = f",drawtext=text='{_ffmpeg_text(caption_text)}':fontfile='{FONT_FILE}':x=(w-text_w)/2:y={caption_y}:fontcolor=white:fontsize=48:box=1:boxcolor=black@0.65:boxborderw=22:enable='between(t,{trigger},{trigger + HOLD_SECONDS})'"
     filters = ";".join([
-        "[0:v]split=2[before_source][after_source]",
+        "[0:v]split=3[before_source][freeze_source][after_source]",
         before,
-        after,
         hold,
-        "[before][hold][after]concat=n=3:v=1:a=0[scene]",
+        after,
+        f"[before][hold][after]concat=n=3:v=1:a=0[assembled]",
+        f"[assembled]scale={width}:{height},fps={fps}[scene]",
         f"[2:v]setpts=PTS+{trigger}/TB[character]",
         f"[scene][character]overlay=x={x}:y={y}:format=auto:eof_action=pass:repeatlast=0[with_character]",
         "[1:v]scale=240:-1[logo]",
-        f"[with_character][logo]overlay=W-w-48:H-h-48{caption_filter}[out]",
+        f"[with_character][logo]overlay=W-w-48:H-h-48:shortest=1{caption_filter}[out]",
     ])
     ffmpeg_argv = [
         "ffmpeg", "-y", "-i", str(source), "-loop", "1", "-i", str(logo_image),
         "-framerate", str(fps), "-start_number", "1", "-i", str(character_frames),
-        "-filter_complex", filters, "-map", "[out]", "-an", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(output_path),
+        "-filter_complex", filters, "-map", "[out]", "-an", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-shortest", str(output_path),
     ]
     return CompositePlan(source_url, character_url, logo_url, source, blend, logo_source, logo_image, rasterize_logo, character_frames, blender_argv, ffmpeg_argv, str(output_path))

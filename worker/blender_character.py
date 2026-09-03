@@ -29,6 +29,46 @@ def normalized(value):
     return "".join(character for character in value.lower() if character.isalnum())
 
 
+def character_position_offset(position):
+    """Place the armature in the active camera's established world-space setup."""
+    positions = {
+        "foreground_left": (-2.8, 0.0, 0.0),
+        "foreground_center": (0.0, 0.0, 0.0),
+        "foreground_right": (2.8, 0.0, 0.0),
+    }
+    try:
+        return positions[position]
+    except KeyError as error:
+        raise RuntimeError(f"unsupported character position: {position}") from error
+
+
+def fade_materials(armature, start_frame, end_frame):
+    """Keyframe node alpha for every character mesh material on the transparent plate."""
+    materials = set()
+    for item in [armature, *armature.children_recursive]:
+        if item.type == "MESH":
+            materials.update(slot.material for slot in item.material_slots if slot.material is not None)
+    faded = False
+    for material in materials:
+        if hasattr(material, "surface_render_method"):
+            material.surface_render_method = "DITHERED"
+        elif hasattr(material, "blend_method"):
+            material.blend_method = "BLEND"
+        if not material.use_nodes:
+            continue
+        principled = material.node_tree.nodes.get("Principled BSDF")
+        alpha = principled.inputs.get("Alpha") if principled else None
+        if alpha is None:
+            continue
+        alpha.default_value = 0.0
+        alpha.keyframe_insert(data_path="default_value", frame=start_frame)
+        alpha.default_value = 1.0
+        alpha.keyframe_insert(data_path="default_value", frame=end_frame)
+        faded = True
+    if not faded:
+        raise RuntimeError("character asset has no alpha-capable material for fade_in")
+
+
 def main():
     args = arguments()
     armature = next((item for item in bpy.context.scene.objects if item.type == "ARMATURE"), None)
@@ -57,20 +97,26 @@ def main():
 
     start_location = armature.location.copy()
     start_scale = armature.scale.copy()
+    offset = character_position_offset(args.position)
+    target_location = start_location.copy()
+    target_location.x += offset[0]
+    target_location.y += offset[1]
+    target_location.z += offset[2]
+    armature.location = target_location
+    entrance_end = max(2, round(args.fps * 0.35))
     if args.entrance == "pop_in":
         armature.scale = (0.001, 0.001, 0.001)
         armature.keyframe_insert(data_path="scale", frame=1)
         armature.scale = start_scale
-        armature.keyframe_insert(data_path="scale", frame=max(2, round(args.fps * 0.35)))
+        armature.keyframe_insert(data_path="scale", frame=entrance_end)
     elif args.entrance in {"slide_left", "slide_right"}:
         distance = -3 if args.entrance == "slide_left" else 3
-        armature.location.x = start_location.x + distance
+        armature.location.x = target_location.x + distance
         armature.keyframe_insert(data_path="location", frame=1)
-        armature.location = start_location
-        armature.keyframe_insert(data_path="location", frame=max(2, round(args.fps * 0.35)))
+        armature.location = target_location
+        armature.keyframe_insert(data_path="location", frame=entrance_end)
     elif args.entrance == "fade_in":
-        # Alpha fading is asset/material-specific; keeping transparent film preserves the plate.
-        pass
+        fade_materials(armature, 1, entrance_end)
     else:
         raise RuntimeError(f"unsupported entrance: {args.entrance}")
     bpy.ops.render.render(animation=True)

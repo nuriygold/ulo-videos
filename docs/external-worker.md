@@ -33,10 +33,10 @@ The request handler must reject all of the following before starting a render:
 - a non-JSON body, missing `renderJobId`, or an ID not starting with `rj_`
   (`400`)
 
-It may return `202 Accepted` after durable hand-off to its internal process, or
-`200 OK` after a synchronous worker run. Either successful response means only
-that the job was accepted; the authoritative result remains the `render_jobs`
-record in Supabase.
+The current service runs a job synchronously and returns `200 OK` only after
+the worker has written its terminal state. The authoritative result remains
+the `render_jobs` record in Supabase. This deliberately avoids acknowledging a
+render from an in-memory background thread that a restart could lose.
 
 Keep the message shape exactly as above. Do not add source URLs, Blob tokens,
 or the scene specification to queue messages.
@@ -61,29 +61,30 @@ For each accepted job, use the service-role credentials only inside the worker:
 3. Resolve and download the source video, optional logo, and character `.blend`
    asset URLs from `spec_snapshot`. Keep downloads in a per-job temporary
    directory.
-4. For dialogue-enabled scenes, set `generating_audio` and `lip_sync` while
-   Piper and Rhubarb create the character performance inputs.
-5. Set `building_scene`, run Blender for character placement, entrance, and
+4. Set `building_scene`, run Blender for character placement, entrance, and
    gesture, then set `rendering` for the scene/plate render.
-6. Set `encoding` and use FFmpeg for source timing/freeze, Blender plate
+5. Set `encoding` and use FFmpeg for source timing/freeze, Blender plate
    compositing, logo compositing, captions, and final MP4 encoding.
-7. Set `uploading`, upload the MP4 to a key such as
+6. Set `uploading`, upload the MP4 to a key such as
    `workspaces/<workspaceId>/renders/<renderJobId>.mp4`, insert an `assets`
    record with `role: render_output`, then set the job to `completed`,
    `progress: 100`, and its `output_asset_id`.
-8. On any failure, set `status: failed`, `progress: 100`,
+7. On any failure, set `status: failed`, `progress: 100`,
    `error_code: render_failed`, and a bounded, non-secret `error_message`.
 
 Use the existing status vocabulary in `src/web/contracts.ts`:
 
 ```text
-queued → preparing → downloading_assets → generating_audio? → lip_sync?
-→ building_scene → rendering → encoding → uploading → completed | failed
+queued → preparing → downloading_assets → building_scene → rendering
+→ encoding → uploading → completed | failed
 ```
 
 The worker should delete its temporary job directory on success and failure.
 It must not mark a job complete if the selected character, dialogue, captions,
-or branding values were ignored.
+or branding values were ignored. The current image supports text captions, not
+spoken dialogue: a non-empty `voice` or `lip_sync` is rejected before asset
+download with `error_code: unsupported_performance`. Captions do not stand in
+for a requested Piper/Rhubarb performance.
 
 ## Configuration by service
 
@@ -96,7 +97,7 @@ deployment log.
 | Supabase | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | Read immutable jobs and assets; update stages/output row. |
 | Vercel Blob | `BLOB_READ_WRITE_TOKEN` | Upload final MP4s. Source assets are downloaded from the saved Blob URLs. |
 | Queue authentication | `RENDER_WORKER_SECRET` | Validate the Vercel control-plane Bearer token. |
-| Optional speech | `PIPER_VOICE_PATH` and any provider-specific voice configuration | Select an installed Piper voice without storing voice secrets in the scene. |
+| Optional speech | `PIPER_VOICE_PATH` and any provider-specific voice configuration | Reserved for a future Piper/Rhubarb image; the current image rejects requested voice/lip-sync. |
 | Optional assets | `FONTCONFIG_PATH` / application font directory as needed | Make the caption font deterministic in the image. |
 
 The Vercel control-plane project also needs all five core variables:
@@ -122,8 +123,7 @@ them in a Vercel Function:
 Python 3.11+
 FFmpeg
 Blender (headless-capable)
-Piper (when dialogue is enabled)
-Rhubarb (when dialogue is enabled)
+Piper and Rhubarb plus a compatible voice/rig mapping (before spoken dialogue is enabled)
 required fonts and character/template packages
 ```
 
@@ -152,7 +152,7 @@ that sources the secret from its secure environment:
 
 ```text
 GET  /healthz                         → 200 and all required tools true
-POST /render-jobs with valid message  → 200 or 202
+POST /render-jobs with valid message  → 200 after the terminal job update
 POST /render-jobs without auth        → 401
 POST /render-jobs with invalid body   → 400
 ```

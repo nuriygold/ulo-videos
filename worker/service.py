@@ -5,14 +5,13 @@ import os
 import shutil
 import subprocess
 import tempfile
-from threading import Thread
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from .control_plane import SupabaseBlobControlPlane
 from .http_contract import authenticate_render_request
-from .pipeline import build_composite_plan
+from .pipeline import UnsupportedPerformanceError, build_composite_plan
 
 
 def _run(argv):
@@ -55,22 +54,40 @@ def execute_render_job(job_id, control_plane, *, worker_id=None, run_command=_ru
         control_plane.update_job(job_id, **completed)
         return {"jobId": job_id, "outputAssetId": output_asset_id, **completed}
     except Exception as error:
-        failure = {"status": "failed", "progress": 100, "error_code": "render_failed", "error_message": str(error)[:2000]}
+        error_code = "unsupported_performance" if isinstance(error, UnsupportedPerformanceError) else "render_failed"
+        failure = {"status": "failed", "progress": 100, "error_code": error_code, "error_message": str(error)[:2000]}
         control_plane.update_job(job_id, **failure)
         raise
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
 
 
-def dispatch_render_job(job_id, control_plane, *, thread_class=Thread):
-    """Acknowledge a queue delivery before the long-running render begins."""
-    thread = thread_class(target=execute_render_job, args=(job_id, control_plane), daemon=True)
-    thread.start()
-    return {"accepted": True, "jobId": job_id}
+def dispatch_render_job(job_id, control_plane, *, execute=execute_render_job):
+    """Run synchronously so a successful response cannot lose a daemon thread."""
+    return execute(job_id, control_plane)
+
+
+def executable_status(*, which=shutil.which, run=subprocess.run):
+    def ready(command, arguments):
+        executable = which(command)
+        if executable is None:
+            return False
+        try:
+            result = run([executable, *arguments], capture_output=True, text=True, check=False, timeout=15)
+        except (OSError, subprocess.SubprocessError):
+            return False
+        return result is not None and result.returncode == 0
+
+    ffmpeg = ready("ffmpeg", ["-version"])
+    blender = ready("blender", ["--background", "--version"])
+    return {"ok": ffmpeg and blender, "ffmpeg": ffmpeg, "blender": blender}
 
 
 class RenderRequestHandler(BaseHTTPRequestHandler):
     server_version = "ulo-videos-external-worker/1.0"
+    control_plane_factory = SupabaseBlobControlPlane
+    render_executor = staticmethod(execute_render_job)
+    health_checker = staticmethod(executable_status)
 
     def _json(self, status, body):
         encoded = json.dumps(body).encode("utf-8")
@@ -82,24 +99,42 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/healthz":
-            self._json(HTTPStatus.OK, {"ready": True, "worker": "blender-ffmpeg"})
+            status = self.health_checker()
+            self._json(HTTPStatus.OK if status["ok"] else HTTPStatus.SERVICE_UNAVAILABLE, status)
+        elif self.path == "/render-jobs":
+            self._method_not_allowed()
         else:
             self._json(HTTPStatus.NOT_FOUND, {"error": "not found"})
 
     def do_POST(self):
+        if self.path != "/render-jobs":
+            self._method_not_allowed()
+            return
         try:
             content_length = int(self.headers.get("Content-Length", "0"))
             if content_length < 1 or content_length > 16_384:
                 raise ValueError("request body must be between 1 and 16384 bytes")
             job_id = authenticate_render_request(self.rfile.read(content_length), self.headers.get("Authorization", ""), os.environ.get("RENDER_WORKER_SECRET"))
-            result = dispatch_render_job(job_id, SupabaseBlobControlPlane())
-            self._json(HTTPStatus.ACCEPTED, result)
+            result = dispatch_render_job(job_id, self.control_plane_factory(), execute=self.render_executor)
+            self._json(HTTPStatus.OK, result)
         except PermissionError as error:
             self._json(HTTPStatus.UNAUTHORIZED, {"error": str(error)})
         except ValueError as error:
             self._json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
         except Exception as error:
             self._json(HTTPStatus.BAD_GATEWAY, {"error": str(error)})
+
+    def _method_not_allowed(self):
+        self.send_response(HTTPStatus.METHOD_NOT_ALLOWED)
+        self.send_header("Allow", "POST")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    do_PUT = _method_not_allowed
+    do_PATCH = _method_not_allowed
+    do_DELETE = _method_not_allowed
+    do_OPTIONS = _method_not_allowed
+    do_HEAD = _method_not_allowed
 
     def log_message(self, format, *args):
         print(format % args, flush=True)

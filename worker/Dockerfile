@@ -5,7 +5,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY . /app/worker
+COPY worker /app/worker
 
 ENV PYTHONUNBUFFERED=1 \
     PORT=8080

@@ -8,9 +8,10 @@ records as the current control plane.
 {"renderJobId":"rj_123"}
 ```
 
-`POST /` validates `Authorization: Bearer $RENDER_WORKER_SECRET`, returns
-`202 Accepted`, then performs the render in the worker process. `GET /healthz`
-is an unauthenticated liveness check.
+`POST /render-jobs` validates `Authorization: Bearer $RENDER_WORKER_SECRET`
+and runs the job synchronously, returning `200` only after the terminal job
+state is written. `GET /healthz` is an unauthenticated readiness check and
+returns `503` until both FFmpeg and Blender execute successfully.
 
 ## What this worker renders
 
@@ -27,15 +28,18 @@ For the submitted immutable Scene v1 snapshot it:
 4. Uploads `output.mp4` to Blob, creates the `render_output` asset row, and
    updates `render_jobs.output_asset_id` and the usual staged status.
 
-Dialogue text is currently rendered as captions. Piper/Rhubarb speech and
-mouth-cue stages are intentionally not claimed as enabled by this container.
+Caption text is currently rendered only when captions are enabled. Piper and
+Rhubarb are not installed: a non-empty `voice` or `lip_sync` fails before asset
+download with `error_code: unsupported_performance`; captions never stand in
+for spoken dialogue.
 
 ## Build and run
 
-Build from this directory so the container contains only worker files:
+Build from the repository root. The root `.dockerignore` excludes `worker/.env`
+and other local environment files from the build context:
 
 ```sh
-docker build -t ulo-videos-render-worker worker
+docker build -t ulo-videos-render-worker -f worker/Dockerfile .
 docker run --rm -p 8080:8080 \
   -e SUPABASE_URL \
   -e SUPABASE_SERVICE_ROLE_KEY \
@@ -51,8 +55,8 @@ diagnostics. Do not put any of these values in source control.
 
 ## Control-plane integration
 
-Deploy this container to a service that exposes its HTTPS root endpoint, then
-set Vercel's existing `RENDER_QUEUE_URL` to that HTTPS URL. Keep
+Deploy this container to a service that exposes its HTTPS `/render-jobs`
+endpoint, then set Vercel's existing `RENDER_QUEUE_URL` to that HTTPS URL. Keep
 `RENDER_WORKER_SECRET` identical in Vercel and in this container. No queue
 message, database schema, browser code, or Vercel Function changes are needed.
 
