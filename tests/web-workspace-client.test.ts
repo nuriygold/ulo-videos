@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   buildInterruptionScene,
   createProject,
+  demoFileDescriptor,
   saveShot,
   submitRender,
   type InterruptionDraft,
@@ -78,4 +79,10 @@ test("workspace API helpers use the project, shot, and render contracts in order
 test("workspace API helpers surface server errors to the editor", async () => {
   const request = async () => Response.json({ error: "render queue is not configured" }, { status: 503 });
   await assert.rejects(createProject("Launch film", request), /render queue is not configured/);
+});
+
+test("demo file descriptors point at bundled assets with the correct upload MIME", () => {
+  assert.deepEqual(demoFileDescriptor("source_video"), { url: "/demo/demo-source.mp4", filename: "demo-source.mp4", mimeType: "video/mp4" });
+  assert.deepEqual(demoFileDescriptor("character"), { url: "/demo/demo-character.blend", filename: "demo-character.blend", mimeType: "application/x-blender" });
+  assert.deepEqual(demoFileDescriptor("logo"), { url: "/demo/demo-logo.svg", filename: "demo-logo.svg", mimeType: "image/svg+xml" });
 });

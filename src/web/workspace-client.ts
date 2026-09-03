@@ -11,6 +11,24 @@ export type InterruptionDraft = {
 import { upload } from "@vercel/blob/client";
 import { buildAssetBlobKey, type BrowserUploadRole } from "./asset-upload";
 
+export type DemoFileRole = "source_video" | "character" | "logo";
+
+export function demoFileDescriptor(role: DemoFileRole) {
+  const files = {
+    source_video: { url: "/demo/demo-source.mp4", filename: "demo-source.mp4", mimeType: "video/mp4" },
+    character: { url: "/demo/demo-character.blend", filename: "demo-character.blend", mimeType: "application/x-blender" },
+    logo: { url: "/demo/demo-logo.svg", filename: "demo-logo.svg", mimeType: "image/svg+xml" },
+  } as const;
+  return files[role];
+}
+
+export async function loadDemoFile(role: DemoFileRole, request: typeof fetch = fetch) {
+  const descriptor = demoFileDescriptor(role);
+  const response = await request(descriptor.url);
+  if (!response.ok) throw new Error(`Demo ${role.replace("_", " ")} could not be loaded.`);
+  return new File([await response.blob()], descriptor.filename, { type: descriptor.mimeType });
+}
+
 export async function uploadAsset(file: File, workspaceId: string, projectId: string, role: BrowserUploadRole) {
   const assetId = `a_${crypto.randomUUID()}`;
   const contentType = role === "character" ? "application/x-blender" : file.type;
