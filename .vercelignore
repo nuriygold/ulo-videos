@@ -1,0 +1,9 @@
+tests/**
+docs/**
+.superpowers/**
+examples/**
+scripts/**
+assets/**
+build/**
+HANDOFF.md
+.gitignore

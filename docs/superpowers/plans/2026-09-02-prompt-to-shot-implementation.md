@@ -78,3 +78,14 @@
 - [ ] Create the GitHub repository `ulo-videos` and push the completed source.
 - [ ] Deploy the browser UI/API surface to a Vercel project whose name begins with `ulo`.
 - [ ] Verify the deployed URL serves the form and clearly labels native local rendering requirements.
+
+### Task 8: Rebrand the project to `ulo-videos`
+
+**Files:** Rename `src/prompt_to_shot/` to `src/ulo_videos/` (updating all imports, tests, and entry points); update `templates/index.html`, `templates/app.js`, `templates/styles.css`, `README.md`, `HANDOFF.md`, and every remaining `prompt-to-shot` / `prompt_to_shot` reference in docs, UI strings, and code.
+
+- [ ] Search the repository for `prompt-to-shot` and `prompt_to_shot` and enumerate every occurrence before editing.
+- [ ] Rename the Python package directory and update all imports, module docstrings, tests, and the `__main__` entry point.
+- [ ] Update user-facing strings (page title, form heading, footer) and all documentation to `ulo-videos`.
+- [ ] Keep the scene template identifier `interruption_spokescharacter_v1` unchanged — it is a scene-contract value, not product naming.
+- [ ] Run the full test suite and re-run the smoke render to confirm nothing regressed.
+- [ ] Update published surface metadata (GitHub repository description, Vercel project naming/metadata) if it still references the old name.
