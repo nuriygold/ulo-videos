@@ -348,6 +348,9 @@ class PreflightTests(ServerTestCase):
                     headers.get("Access-Control-Allow-Origin"),
                     "https://ulo-videos.vercel.app",
                 )
+                self.assertEqual(
+                    headers.get("Access-Control-Allow-Private-Network"), "true"
+                )
                 self.assertIn("POST", headers.get("Access-Control-Allow-Methods"))
                 self.assertIn("Content-Type", headers.get("Access-Control-Allow-Headers"))
 

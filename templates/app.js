@@ -35,7 +35,7 @@ const RESOLVE = {
   startServer:
     "Resolve: start the app's server (PYTHONPATH=src python3 -m ulo_videos), then submit again.",
   localRenderer:
-    "Resolve: on this machine, install any missing tools listed below, run the app (PYTHONPATH=src python3 -m ulo_videos) in a terminal, and reload this page — it will then detect the local renderer and can render through it.",
+    "Resolve: on this machine — 1) install any missing tools listed below, 2) run the app in a terminal (PYTHONPATH=src python3 -m ulo_videos), 3) open http://127.0.0.1:8000 — that form renders in one click, and this page will detect it too when your browser allows the check (Chrome asks permission).",
 };
 
 const DOWNLOADS = {

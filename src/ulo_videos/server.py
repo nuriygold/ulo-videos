@@ -172,10 +172,19 @@ def _json_response(status, payload):
 
 
 def _cors_extra(headers):
-    """CORS echo headers for allowlisted deployed-form origins, else None."""
+    """CORS echo headers for allowlisted deployed-form origins, else None.
+
+    Access-Control-Allow-Private-Network is included for Chrome's private/
+    local-network-access gate: a deployed page probing the viewer's machine
+    answers a preflight the browser may send for loopback requests.
+    """
     origin = headers.get("Origin", "") if headers is not None else ""
     if origin in TOOL_STATUS_CORS_ORIGINS:
-        return {"Access-Control-Allow-Origin": origin, "Vary": "Origin"}
+        return {
+            "Access-Control-Allow-Origin": origin,
+            "Access-Control-Allow-Private-Network": "true",
+            "Vary": "Origin",
+        }
     return None
 
 
