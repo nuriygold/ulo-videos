@@ -91,6 +91,7 @@ class MemoryControlPlaneStore implements ControlPlaneStore {
   }
 
   async createRenderJob() {}
+  async getRenderJobById() { return null; }
   async listRenderJobs() { return []; }
   async getRenderJob() { return null; }
   async updateRenderJob() {}

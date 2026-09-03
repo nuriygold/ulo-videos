@@ -163,6 +163,12 @@ export class SupabaseControlPlaneStore implements ControlPlaneStore {
     return data;
   }
 
+  async getRenderJobById(id: string) {
+    const { data, error } = await this.client.from("render_jobs").select("*").eq("id", id).maybeSingle();
+    if (error) throw error;
+    return data;
+  }
+
   async updateRenderJob(id: string, update: Json) {
     const { error } = await this.client.from("render_jobs").update(update).eq("id", id);
     if (error) throw error;

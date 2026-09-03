@@ -25,6 +25,7 @@ export interface ControlPlaneStore {
   listRenderJobs(workspaceId: string, projectId?: string): Promise<Record<string, unknown>[]>;
   createRenderJob(input: { id: string; workspaceId: string; projectId: string; shotId: string; template: string; templateVersion: number; specSnapshot: Record<string, unknown> }): Promise<void>;
   getRenderJob(id: string, workspaceId: string): Promise<Record<string, unknown> | null>;
+  getRenderJobById(id: string): Promise<Record<string, unknown> | null>;
   updateRenderJob(id: string, update: Record<string, unknown>): Promise<void>;
 }
 
