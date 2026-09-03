@@ -28,7 +28,7 @@ export class SupabaseControlPlaneStore implements ControlPlaneStore {
   }
 
   async saveAsset(input: AssetRecord) {
-    const { error } = await this.client.from("assets").insert({
+    const asset = {
       id: input.id,
       workspace_id: input.workspaceId,
       project_id: input.projectId ?? null,
@@ -38,8 +38,29 @@ export class SupabaseControlPlaneStore implements ControlPlaneStore {
       mime_type: input.mimeType,
       bytes: input.bytes,
       sha256: input.sha256 ?? null,
-    });
-    if (error) throw error;
+    };
+    const { error } = await this.client.from("assets").insert(asset);
+    if (!error) return;
+    if (error.code !== "23505") throw error;
+
+    const { data: existing, error: lookupError } = await this.client
+      .from("assets")
+      .select("id,workspace_id,project_id,blob_key,blob_url,role,mime_type,bytes,sha256")
+      .eq("id", input.id)
+      .maybeSingle();
+    if (lookupError) throw lookupError;
+
+    const identical = existing
+      && existing.id === asset.id
+      && existing.workspace_id === asset.workspace_id
+      && existing.project_id === asset.project_id
+      && existing.blob_key === asset.blob_key
+      && existing.blob_url === asset.blob_url
+      && existing.role === asset.role
+      && existing.mime_type === asset.mime_type
+      && existing.bytes === asset.bytes
+      && existing.sha256 === asset.sha256;
+    if (!identical) throw new Error("asset ID conflicts with existing metadata");
   }
 
   async saveShot(input: { id: string; projectId: string; name: string; template: string; templateVersion: number; spec: Json }) {

@@ -121,32 +121,69 @@ test("assetRecordFromUpload rejects mismatched paths, MIME types, and sizes", ()
   );
 });
 
-test("Supabase asset persistence rejects a duplicate ID without replacing its immutable claim", async () => {
-  const originalAsset = {
-    id: "a_789",
-    workspace_id: "w_original",
-    blob_key: "workspaces/w_original/workspace-assets/logo/a_789/original.png",
-  };
-  let storedAsset = { ...originalAsset };
-  const fakeClient = {
+const completedAsset = {
+  id: "a_789",
+  workspaceId: "w_123",
+  projectId: "p_456",
+  blobKey: buildAssetBlobKey(intent),
+  blobUrl: "https://blob.example/a_789",
+  role: "source_video" as const,
+  mimeType: "video/mp4",
+  bytes: 42,
+  sha256: "abc123",
+};
+
+const persistedCompletedAsset = {
+  id: completedAsset.id,
+  workspace_id: completedAsset.workspaceId,
+  project_id: completedAsset.projectId,
+  blob_key: completedAsset.blobKey,
+  blob_url: completedAsset.blobUrl,
+  role: completedAsset.role as string,
+  mime_type: completedAsset.mimeType,
+  bytes: completedAsset.bytes,
+  sha256: completedAsset.sha256,
+};
+
+function duplicateAssetClient(existingAsset: typeof persistedCompletedAsset) {
+  return {
     from: () => ({
       insert: async () => ({ error: { code: "23505", message: "duplicate key" } }),
-      upsert: async (replacement: typeof storedAsset) => {
-        storedAsset = replacement;
-        return { error: null };
-      },
+      select: () => ({
+        eq: () => ({
+          maybeSingle: async () => ({ data: existingAsset, error: null }),
+        }),
+      }),
     }),
   } as never;
-  const store = new SupabaseControlPlaneStore(fakeClient);
-  await assert.rejects(store.saveAsset({
-    id: "a_789",
-    workspaceId: "w_123",
-    projectId: "p_456",
-    blobKey: buildAssetBlobKey(intent),
-    blobUrl: "https://blob.example/a_789",
-    role: "source_video",
-    mimeType: "video/mp4",
-    bytes: 42,
-  }), (error: unknown) => Boolean(error && typeof error === "object" && "code" in error && error.code === "23505"));
-  assert.deepEqual(storedAsset, originalAsset);
+}
+
+test("Supabase asset persistence treats an identical duplicate completion as a successful retry", async () => {
+  const store = new SupabaseControlPlaneStore(duplicateAssetClient(persistedCompletedAsset));
+
+  await assert.doesNotReject(store.saveAsset(completedAsset));
+});
+
+test("Supabase asset persistence rejects duplicate IDs with conflicting immutable metadata", async (t) => {
+  const conflicts: Array<[string, Partial<typeof persistedCompletedAsset>]> = [
+    ["workspace ownership", { workspace_id: "w_other" }],
+    ["project ownership", { project_id: "p_other" }],
+    ["blob key", { blob_key: "workspaces/w_123/projects/p_456/source_video/a_789/other.mp4" }],
+    ["blob URL", { blob_url: "https://blob.example/other" }],
+    ["role", { role: "logo" }],
+    ["MIME type", { mime_type: "video/webm" }],
+    ["size", { bytes: 43 }],
+    ["checksum", { sha256: "different" }],
+  ];
+
+  for (const [name, conflict] of conflicts) {
+    await t.test(name, async () => {
+      const store = new SupabaseControlPlaneStore(duplicateAssetClient({
+        ...persistedCompletedAsset,
+        ...conflict,
+      }));
+
+      await assert.rejects(store.saveAsset(completedAsset), /conflicts with existing metadata/i);
+    });
+  }
 });

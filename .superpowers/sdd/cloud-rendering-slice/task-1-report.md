@@ -88,3 +88,38 @@ Status: DONE_WITH_CONCERNS
 - Verified the staged patch is limited to immutable asset-claim insertion/collision rejection, Blender-only character upload policy, authorization coverage, and this report.
 - Fresh checks: `npm test` PASS (10/10), `npx tsc --noEmit` PASS, `git diff --check` PASS, and `npm run build` PASS.
 - Remaining concern: no live Vercel Blob/Supabase callback was exercised; deployment credentials are required for an end-to-end upload check.
+
+## Fix round 2: idempotent upload completion
+
+Status: DONE_WITH_CONCERNS
+
+### Review finding addressed
+
+- Kept `insert` as the asset-claim operation so a callback cannot overwrite an existing row.
+- On a duplicate-key response, `SupabaseControlPlaneStore.saveAsset` now reads the existing asset and treats the callback as a successful no-op only when all immutable metadata is identical.
+- Duplicate IDs with conflicting workspace/project ownership, blob key/URL, role, MIME type, byte size, or checksum are rejected.
+- The existing scoped upload authorization and Blender-only character policy were not changed.
+
+### Tests and verification
+
+1. `node --import tsx --test tests/web-asset-upload.test.ts` before implementation
+   - EXPECTED RED: the identical retry propagated the duplicate-key error, and all conflicting-metadata cases lacked the intended collision error.
+2. `node --import tsx --test tests/web-asset-upload.test.ts` after implementation
+   - PASS: 18 tests, 18 passed, 0 failed, including the identical retry and eight conflicting-field cases.
+3. Initial `npm test`
+   - PASS: 19 tests, 19 passed, 0 failed.
+4. Initial `npx tsc --noEmit`
+   - TEST-FIXTURE ERROR: the persisted-role fixture was inferred as the single literal `source_video`; widened it to represent persisted role strings.
+5. Focused test and `npx tsc --noEmit` after the fixture correction
+   - PASS: 18 focused tests passed and TypeScript exited 0 with no diagnostics.
+6. Final `npm test`
+   - PASS: 19 tests, 19 passed, 0 failed.
+7. Final `npx tsc --noEmit`
+   - PASS: exit 0, no diagnostics.
+8. Final `git diff --check`
+   - PASS: exit 0, no whitespace errors.
+
+### Concerns
+
+- No live Supabase duplicate callback was exercised because local verification uses a focused Supabase client test double. The test covers the query and comparison behavior, but deployment credentials are required for an end-to-end callback retry check.
+- Unrelated pre-existing working-tree changes remain untouched and are excluded from this fix commit.
