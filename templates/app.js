@@ -26,7 +26,11 @@ const RESOLVE = {
   submit: "Resolve: fix the issue named above, then submit again.",
   startServer:
     "Resolve: start the app's server (PYTHONPATH=src python3 -m ulo_videos), then try again.",
+  localRenderer:
+    "Resolve: start the local app (PYTHONPATH=src python3 -m ulo_videos) on this machine and reload — this panel will then report your machine's real toolchain.",
 };
+
+const LOCAL_PROBE_PORTS = [8000, 8080, 8777];
 
 const DOWNLOADS = {
   ffmpeg: { url: "https://ffmpeg.org/download.html", label: "Download FFmpeg" },
@@ -129,39 +133,103 @@ function renderResult(body) {
   resultPanel.hidden = false;
 }
 
+function validToolReport(data) {
+  return (
+    !!data &&
+    typeof data === "object" &&
+    ["blender", "ffmpeg"].every(
+      (name) => data[name] && typeof data[name].available === "boolean",
+    )
+  );
+}
+
+function probeLocalRenderer() {
+  const attempts = LOCAL_PROBE_PORTS.map((port) =>
+    fetch(`http://127.0.0.1:${port}/api/tools`, {
+      signal: AbortSignal.timeout(1500),
+    })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => (validToolReport(data) ? { port, report: data } : null))
+      .catch(() => null),
+  );
+  return Promise.all(attempts).then((found) => found.find(Boolean) || null);
+}
+
+function toolItem(name, info, fixFor) {
+  const item = document.createElement("li");
+  const status = document.createElement("p");
+  status.textContent = info.available
+    ? `${name}: available (${info.path})`
+    : `${name}: not installed on the machine running this app`;
+  item.className = info.available ? "tool-ok" : "tool-missing";
+  item.append(status);
+  if (!info.available) item.append(fixFor(name));
+  return item;
+}
+
+function toolRows(report, fixFor) {
+  return Object.entries(report).map(([name, info]) => toolItem(name, info, fixFor));
+}
+
+function introItem(text, resolution) {
+  const item = document.createElement("li");
+  item.className = resolution ? "tool-missing" : "tool-ok";
+  const line = document.createElement("p");
+  line.textContent = text;
+  item.append(line);
+  if (resolution) item.append(resolution);
+  return item;
+}
+
+function unreachableItem() {
+  const item = document.createElement("li");
+  const status = document.createElement("p");
+  status.textContent = "Toolchain status unavailable; is the app's server running?";
+  item.className = "tool-missing";
+  item.append(status);
+  item.append(resolutionLine(RESOLVE.startServer, ["python"]));
+  return item;
+}
+
+const LOCAL_FIX = (name) =>
+  resolutionLine(name === "blender" ? RESOLVE.blenderLocal : RESOLVE.ffmpegLocal, [name]);
+
+const DEPLOYED_FIX = (name) => resolutionLine(RESOLVE.deployed, [name, "python"]);
+
 function refreshToolStatus() {
   const list = document.querySelector("#tool-list");
-  fetch("/api/tools")
-    .then(async (response) => {
-      if (!response.ok) throw new Error(`status ${response.status}`);
-      const report = await response.json();
-      const items = Object.entries(report).map(([name, info]) => {
-        const item = document.createElement("li");
-        const status = document.createElement("p");
-        status.textContent = info.available
-          ? `${name}: available (${info.path})`
-          : `${name}: not installed on the machine running this app`;
-        item.className = info.available ? "tool-ok" : "tool-missing";
-        item.append(status);
-        if (!info.available) {
-          const fix = IS_LOCAL
-            ? (name === "blender" ? RESOLVE.blenderLocal : RESOLVE.ffmpegLocal)
-            : RESOLVE.deployed;
-          item.append(resolutionLine(fix, IS_LOCAL ? [name] : [name, "python"]));
-        }
-        return item;
-      });
-      list.replaceChildren(...items);
-    })
-    .catch(() => {
-      const item = document.createElement("li");
-      const status = document.createElement("p");
-      status.textContent = "Toolchain status unavailable; is the app's server running?";
-      item.className = "tool-missing";
-      item.append(status);
-      item.append(resolutionLine(RESOLVE.startServer, ["python"]));
-      list.replaceChildren(item);
-    });
+  if (IS_LOCAL) {
+    fetch("/api/tools")
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`status ${response.status}`);
+        list.replaceChildren(...toolRows(await response.json(), LOCAL_FIX));
+      })
+      .catch(() => list.replaceChildren(unreachableItem()));
+    return;
+  }
+  probeLocalRenderer().then((found) => {
+    if (found) {
+      list.replaceChildren(
+        introItem(
+          `Detected the local renderer on 127.0.0.1:${found.port} — reporting this machine's real toolchain:`,
+        ),
+        ...toolRows(found.report, LOCAL_FIX),
+      );
+      return;
+    }
+    list.replaceChildren(
+      introItem(
+        "No local renderer detected on this machine (probed 127.0.0.1 ports 8000, 8080, 8777) — a web page cannot inspect installed programs by itself.",
+        resolutionLine(RESOLVE.localRenderer, ["python"]),
+      ),
+    );
+    fetch("/api/tools")
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`status ${response.status}`);
+        list.append(...toolRows(await response.json(), DEPLOYED_FIX));
+      })
+      .catch(() => list.append(unreachableItem()));
+  });
 }
 
 form.addEventListener("submit", async (event) => {

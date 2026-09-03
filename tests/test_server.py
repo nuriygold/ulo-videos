@@ -101,11 +101,13 @@ class ServerTestCase(unittest.TestCase):
     def write_static(self, name, text):
         (self.static_dir / name).write_text(text, encoding="utf-8")
 
-    def request(self, path, *, method="GET", body=None):
+    def request(self, path, *, method="GET", body=None, headers=None):
         data = body.encode("utf-8") if isinstance(body, str) else body
-        headers = {"Content-Type": "application/json"} if data is not None else {}
+        request_headers = {"Content-Type": "application/json"} if data is not None else {}
+        if headers:
+            request_headers.update(headers)
         request = urllib.request.Request(
-            self.base_url + path, data=data, headers=headers, method=method
+            self.base_url + path, data=data, headers=request_headers, method=method
         )
         try:
             with urllib.request.urlopen(request, timeout=5) as response:
@@ -307,6 +309,28 @@ class ToolsApiTests(ServerTestCase):
         report = json.loads(body)
         self.assertFalse(report["ffmpeg"]["available"])
         self.assertFalse(report["blender"]["available"])
+
+    def test_tools_cors_echoes_deployed_form_origins(self):
+        for origin in (
+            "https://ulo-videos.vercel.app",
+            "https://ulo-videos-nuriys-projects.vercel.app",
+        ):
+            with self.subTest(origin=origin):
+                status, headers, _ = self.request(
+                    "/api/tools", headers={"Origin": origin}
+                )
+
+                self.assertEqual(status, 200)
+                self.assertEqual(headers.get("Access-Control-Allow-Origin"), origin)
+
+    def test_tools_cors_silent_for_foreign_or_absent_origin(self):
+        for origin in ("https://example.net", None):
+            with self.subTest(origin=origin):
+                extra = {"Origin": origin} if origin else None
+                status, headers, _ = self.request("/api/tools", headers=extra)
+
+                self.assertEqual(status, 200)
+                self.assertNotIn("Access-Control-Allow-Origin", headers)
 
 
 class NormalizeFormPayloadTests(unittest.TestCase):

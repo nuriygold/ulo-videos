@@ -40,6 +40,13 @@ from .templates import compile_scene, serialize_scene
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8000
+# Deployed form origins allowed to read local toolchain status cross-origin:
+# the deployed page probes this endpoint on the viewer's machine so its
+# toolchain panel can report that machine's real tools.
+TOOL_STATUS_CORS_ORIGINS = (
+    "https://ulo-videos.vercel.app",
+    "https://ulo-videos-nuriys-projects.vercel.app",
+)
 MAX_BODY_BYTES = 1_000_000
 _RESOLUTION_PATTERN = re.compile(r"^\s*(\d+)\s*[xX]\s*(\d+)\s*$")
 _STATIC_FILES = {
@@ -146,6 +153,25 @@ def _response(status, body, content_type, extra_headers=None):
 def _json_response(status, payload):
     return _response(
         status, canonical_json_bytes(payload), "application/json; charset=utf-8"
+    )
+
+
+def _tool_status_response(state, headers):
+    """Report toolchain status, CORS-open to the deployed form origins.
+
+    The deployed page probes this endpoint on the viewer's machine to report
+    that machine's real tools; a matching Origin is echoed so the browser may
+    read the answer, and anything else gets no CORS header.
+    """
+    origin = headers.get("Origin", "") if headers is not None else ""
+    extra = None
+    if origin in TOOL_STATUS_CORS_ORIGINS:
+        extra = {"Access-Control-Allow-Origin": origin, "Vary": "Origin"}
+    return _response(
+        200,
+        canonical_json_bytes(state.toolchain.status()),
+        "application/json; charset=utf-8",
+        extra,
     )
 
 
@@ -269,7 +295,7 @@ def _route(state, method, path, target, headers, input_stream):
         return _method_not_allowed(method, path)
     if path == "/api/tools":
         if method == "GET":
-            return _json_response(200, state.toolchain.status())
+            return _tool_status_response(state, headers)
         return _method_not_allowed(method, path)
     if path == "/api/spec/download":
         if method == "GET":
@@ -402,7 +428,10 @@ def make_wsgi_app(*, static_dir=None, project_root=None, toolchain=None):
         query = environ.get("QUERY_STRING", "")
         if query:
             target = f"{target}?{query}"
-        request_headers = {"Content-Length": environ.get("CONTENT_LENGTH", "")}
+        request_headers = {
+            "Content-Length": environ.get("CONTENT_LENGTH", ""),
+            "Origin": environ.get("HTTP_ORIGIN", ""),
+        }
         status, headers, body = dispatch_request(
             state,
             str(environ.get("REQUEST_METHOD", "GET")).upper(),
