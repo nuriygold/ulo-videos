@@ -5,5 +5,10 @@
       "excludeFiles": "{tests/**,docs/**,examples/**,scripts/**,assets/**,build/**,HANDOFF.md}"
     }
   },
-  "rewrites": [{ "source": "/(.*)", "destination": "/api" }]
+  "rewrites": [
+    { "source": "/", "destination": "/templates/index.html" },
+    { "source": "/index.html", "destination": "/templates/index.html" },
+    { "source": "/app.js", "destination": "/templates/app.js" },
+    { "source": "/styles.css", "destination": "/templates/styles.css" }
+  ]
 }

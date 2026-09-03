@@ -1,8 +1,9 @@
 """Vercel entry point: the ulo-videos form and scene API as a WSGI app.
 
 Vercel's Python runtime (the `/api` directory contract) loads this file as a
-Vercel Function, and `app` handles every request through the catch-all rewrite
-in `vercel.json`. All routes are delegated to
+Vercel Function serving the `/api` routes natively — no rewrite needed. The
+form and its scripts are CDN-served from `templates/` through the vercel.json
+rewrites. All API routes are delegated to
 `ulo_videos.server.make_wsgi_app` — the same dispatch logic the local
 `http.server` app serves — so the deployed surface is the browser form, the
 scene compiler, the render planner, and toolchain status.
