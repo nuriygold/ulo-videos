@@ -309,7 +309,7 @@ def dispatch_request(state, method, target, *, headers, input_stream):
         return _json_response(500, {"error": "internal server error"})
 
 
-class PromptToShotHTTPServer(ThreadingHTTPServer):
+class UloVideosHTTPServer(ThreadingHTTPServer):
     """Threaded server carrying the form's state and last generated spec."""
 
     daemon_threads = True
@@ -321,7 +321,7 @@ class PromptToShotHTTPServer(ThreadingHTTPServer):
         super().__init__(address, handler)
 
 
-class PromptToShotHandler(BaseHTTPRequestHandler):
+class UloVideosHandler(BaseHTTPRequestHandler):
     """Writes the shared request dispatcher's responses onto the socket."""
 
     def do_GET(self):
@@ -366,9 +366,9 @@ def _app_state(static_dir, project_root, toolchain):
 def make_server(host=DEFAULT_HOST, port=DEFAULT_PORT, *, static_dir=None, project_root=None, toolchain=None):
     """Create the local HTTP server bound to (host, port) without serving it."""
     state = _app_state(static_dir, project_root, toolchain)
-    return PromptToShotHTTPServer(
+    return UloVideosHTTPServer(
         (host, port),
-        PromptToShotHandler,
+        UloVideosHandler,
         static_dir=state.static_dir,
         project_root=state.project_root,
         toolchain=state.toolchain,
