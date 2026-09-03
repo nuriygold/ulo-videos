@@ -76,6 +76,8 @@ class HttpContractTests(unittest.TestCase):
         dockerfile = (root / "worker" / "Dockerfile").read_text()
         dockerignore = (root / ".dockerignore").read_text() if (root / ".dockerignore").exists() else ""
         self.assertIn("COPY worker /app/worker", dockerfile)
+        self.assertIn("blender-${BLENDER_VERSION}-linux-x64.tar.xz", dockerfile)
+        self.assertIn("a31f524fa99a527d3d52b7f5aaa68c34e1a19d5a1c9473f79c5cc610fd5b10e9", dockerfile)
         self.assertIn("worker/.env", dockerignore)
         self.assertIn(".env", dockerignore)
 
