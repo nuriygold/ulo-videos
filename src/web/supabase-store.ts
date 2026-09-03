@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { AssetRecord, ControlPlaneStore, ProjectRecord, ShotRecord } from "./integrations";
+import { WorkspaceOwnershipError } from "./request-errors";
 
 type Json = Record<string, unknown>;
 
@@ -50,6 +51,17 @@ export class SupabaseControlPlaneStore implements ControlPlaneStore {
     return Boolean(data);
   }
 
+  async getShotWorkspace(shotId: string) {
+    const { data, error } = await this.client
+      .from("shots")
+      .select("projects!inner(workspace_id)")
+      .eq("id", shotId)
+      .maybeSingle();
+    if (error) throw error;
+    const projects = (data as { projects?: { workspace_id?: string } | Array<{ workspace_id?: string }> } | null)?.projects;
+    return (Array.isArray(projects) ? projects[0]?.workspace_id : projects?.workspace_id) ?? null;
+  }
+
   async saveAsset(input: AssetRecord) {
     const asset = {
       id: input.id,
@@ -87,10 +99,22 @@ export class SupabaseControlPlaneStore implements ControlPlaneStore {
   }
 
   async saveShot(input: { id: string; workspaceId: string; projectId: string; name: string; template: string; templateVersion: number; spec: Json }) {
-    if (!await this.projectBelongsToWorkspace(input.projectId, input.workspaceId)) throw new Error("project not found in this workspace");
-    const { data, error } = await this.client
+    if (!await this.projectBelongsToWorkspace(input.projectId, input.workspaceId)) throw new WorkspaceOwnershipError("project not found in this workspace");
+    const { data: existing, error: existingError } = await this.client
       .from("shots")
-      .upsert({ id: input.id, project_id: input.projectId, name: input.name, template: input.template, template_version: input.templateVersion, spec: input.spec, updated_at: new Date().toISOString() })
+      .select("id,project_id,projects!inner(workspace_id)")
+      .eq("id", input.id)
+      .maybeSingle();
+    if (existingError) throw existingError;
+    const projectLink = (existing as { projects?: { workspace_id?: string } | Array<{ workspace_id?: string }> } | null)?.projects;
+    const existingWorkspace = Array.isArray(projectLink) ? projectLink[0]?.workspace_id : projectLink?.workspace_id;
+    if (existing && existingWorkspace !== input.workspaceId) throw new WorkspaceOwnershipError("shot ID belongs to another workspace");
+    if (existing && existing.project_id !== input.projectId) throw new WorkspaceOwnershipError("shot cannot be reassigned to another project", 409);
+    const values = { name: input.name, template: input.template, template_version: input.templateVersion, spec: input.spec, updated_at: new Date().toISOString() };
+    const query = existing
+      ? this.client.from("shots").update(values).eq("id", input.id).eq("project_id", input.projectId)
+      : this.client.from("shots").insert({ id: input.id, project_id: input.projectId, ...values });
+    const { data, error } = await query
       .select("id,project_id,name,template,template_version,spec,created_at,updated_at")
       .single();
     if (error) throw error;

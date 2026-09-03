@@ -54,6 +54,10 @@ class MemoryControlPlaneStore implements ControlPlaneStore {
     return this.projects.some((project) => project.id === projectId && project.workspaceId === workspaceId);
   }
 
+  async getShotWorkspace(shotId: string) {
+    return this.shots.find((shot) => shot.id === shotId)?.projectId === "p_2" ? "ws_2" : this.shots.some((shot) => shot.id === shotId) ? "ws_1" : null;
+  }
+
   async saveAsset() {}
 
   async saveShot(input: Omit<ShotRecord, "createdAt" | "updatedAt"> & { workspaceId: string }) {
@@ -170,6 +174,59 @@ test("shot helpers save, list, and get only through the owning workspace", async
   await assert.rejects(saveShotForWorkspace({ ...saved, workspaceId: "ws_2" }, store), /project/i);
 });
 
+test("Supabase saves shots with an ownership-scoped insert or update, never an upsert", async () => {
+  const operations: Array<{ table: string; method: string; filters: Array<[string, unknown]> }> = [];
+  let existing: Record<string, unknown> | null = null;
+  const client = {
+    from: (table: string) => {
+      const operation = { table, method: "", filters: [] as Array<[string, unknown]> };
+      operations.push(operation);
+      const query = {
+        insert: () => { operation.method = "insert"; return query; },
+        update: () => { operation.method = "update"; return query; },
+        select: () => { if (!operation.method) operation.method = "select"; return query; },
+        eq: (key: string, value: unknown) => { operation.filters.push([key, value]); return query; },
+        single: async () => ({ data: { id: "s_1", project_id: "p_1", name: "Opening shot", template: validScene.template, template_version: 1, spec: validScene, created_at: "2026-09-03T12:00:00.000Z", updated_at: "2026-09-03T12:00:01.000Z" }, error: null }),
+        maybeSingle: async () => ({ data: table === "projects" ? { id: "p_1" } : existing, error: null }),
+      };
+      return query;
+    },
+  } as never;
+  const store = new SupabaseControlPlaneStore(client);
+  const input = { id: "s_1", workspaceId: "ws_1", projectId: "p_1", name: "Opening shot", template: validScene.template, templateVersion: 1, spec: validScene };
+
+  await store.saveShot(input);
+  existing = { id: "s_1", project_id: "p_1", projects: { workspace_id: "ws_1" } };
+  await store.saveShot({ ...input, name: "Updated shot" });
+
+  assert.equal(operations.some((operation) => operation.method === "upsert"), false);
+  assert.deepEqual(operations.filter((operation) => operation.table === "shots").map((operation) => operation.method), ["select", "insert", "select", "update"]);
+  assert.deepEqual(operations.filter((operation) => operation.table === "shots")[3].filters, [["id", "s_1"], ["project_id", "p_1"]]);
+});
+
+test("Supabase rejects a shot ID already owned by another workspace", async () => {
+  const operations: Array<{ table: string; method: string }> = [];
+  const client = {
+    from: (table: string) => {
+      const operation = { table, method: "" };
+      operations.push(operation);
+      const query = {
+        insert: () => { operation.method = "insert"; return query; },
+        update: () => { operation.method = "update"; return query; },
+        select: () => { if (!operation.method) operation.method = "select"; return query; },
+        eq: () => query,
+        single: async () => ({ data: null, error: null }),
+        maybeSingle: async () => ({ data: table === "projects" ? { id: "p_1" } : { id: "s_taken", project_id: "p_other", projects: { workspace_id: "ws_other" } }, error: null }),
+      };
+      return query;
+    },
+  } as never;
+  const store = new SupabaseControlPlaneStore(client);
+
+  await assert.rejects(store.saveShot({ id: "s_taken", workspaceId: "ws_1", projectId: "p_1", name: "Opening shot", template: validScene.template, templateVersion: 1, spec: validScene }), /workspace/i);
+  assert.equal(operations.some((operation) => operation.table === "shots" && ["insert", "update", "upsert"].includes(operation.method)), false);
+});
+
 test("Supabase project and shot methods map camel-case records and keep queries workspace-scoped", async () => {
   const operations: Array<{ table: string; method: string; value?: unknown; filters: Array<[string, unknown]> }> = [];
   const client = {
@@ -226,16 +283,17 @@ test("Supabase project and shot methods map camel-case records and keep queries 
   });
   assert.deepEqual(operations[1].filters, [["workspace_id", "ws_1"]]);
   assert.deepEqual(operations[2].filters, [["id", "p_1"], ["workspace_id", "ws_1"]]);
+  assert.deepEqual(operations[4].filters, [["id", "s_1"]]);
   assert.deepEqual({
-    ...operations[4],
-    value: { ...(operations[4].value as Record<string, unknown>), updated_at: "timestamp" },
+    ...operations[5],
+    value: { ...(operations[5].value as Record<string, unknown>), updated_at: "timestamp" },
   }, {
     table: "shots",
-    method: "upsert",
+    method: "insert",
     value: { id: "s_1", project_id: "p_1", name: "Opening shot", template: validScene.template, template_version: 1, spec: validScene, updated_at: "timestamp" },
     filters: [],
   });
-  assert.match((operations[4].value as { updated_at: string }).updated_at, /^\d{4}-\d{2}-\d{2}T/);
-  assert.deepEqual(operations[5].filters, [["project_id", "p_1"], ["projects.workspace_id", "ws_1"]]);
-  assert.deepEqual(operations[6].filters, [["id", "s_1"], ["project_id", "p_1"], ["projects.workspace_id", "ws_1"]]);
+  assert.match((operations[5].value as { updated_at: string }).updated_at, /^\d{4}-\d{2}-\d{2}T/);
+  assert.deepEqual(operations[6].filters, [["project_id", "p_1"], ["projects.workspace_id", "ws_1"]]);
+  assert.deepEqual(operations[7].filters, [["id", "s_1"], ["project_id", "p_1"], ["projects.workspace_id", "ws_1"]]);
 });
