@@ -19,6 +19,7 @@ input:focus, select:focus, textarea:focus, button:focus-visible { outline: 3px s
 a { color: var(--accent); font-weight: 800; }
 .workspace { width: min(1260px, 100%); margin: auto; padding: clamp(24px, 5vw, 64px); }
 .hero { display: flex; align-items: end; justify-content: space-between; gap: 30px; margin-bottom: 32px; }
+.brand-logo { display: block; width: min(260px, 70vw); height: auto; margin-bottom: 18px; }
 .hero h1 { font: 700 clamp(36px, 6vw, 68px)/.98 Georgia, serif; letter-spacing: -.04em; margin: 7px 0 0; max-width: 690px; }
 .hero > p { max-width: 470px; color: var(--muted); margin: 0; }
 .eyebrow { text-transform: uppercase; letter-spacing: .14em; font-size: 11px; font-weight: 800; color: var(--accent); margin: 0; }
