@@ -9,3 +9,4 @@ HANDOFF.md
 .vercel
 node_modules/
 .next/
+tsconfig.tsbuildinfo

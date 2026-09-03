@@ -16,6 +16,7 @@ export type RenderJob = {
 export interface JobRepository {
   create(job: RenderJob): Promise<void>;
   get(id: string, workspaceId: string): Promise<RenderJob | null>;
+  update(id: string, update: Partial<Pick<RenderJob, "status" | "progress">> & { errorCode?: string; errorMessage?: string }): Promise<void>;
 }
 
 export interface RenderQueue {
@@ -31,6 +32,16 @@ export async function submitRenderJob(input: Omit<RenderJob, "status" | "progres
     attempt: 1,
   };
   await repository.create(job);
-  await queue.publish(createRenderJobMessage(job.id));
+  try {
+    await queue.publish(createRenderJobMessage(job.id));
+  } catch (error) {
+    await repository.update(job.id, {
+      status: "failed",
+      progress: 100,
+      errorCode: "queue_unavailable",
+      errorMessage: error instanceof Error ? error.message : "render queue rejected the job",
+    });
+    throw error;
+  }
   return job;
 }
