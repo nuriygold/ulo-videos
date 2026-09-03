@@ -149,7 +149,13 @@ export class SupabaseControlPlaneStore implements ControlPlaneStore {
     if (projectId) query = query.eq("project_id", projectId);
     const { data, error } = await query;
     if (error) throw error;
-    return (data ?? []) as Record<string, unknown>[];
+    const jobs = (data ?? []) as Record<string, unknown>[];
+    const assetIds = jobs.map((job) => job.output_asset_id).filter((id): id is string => typeof id === "string");
+    if (!assetIds.length) return jobs;
+    const { data: assets, error: assetError } = await this.client.from("assets").select("id,blob_url").eq("workspace_id", workspaceId).in("id", assetIds);
+    if (assetError) throw assetError;
+    const urls = new Map((assets ?? []).map((asset) => [asset.id, asset.blob_url]));
+    return jobs.map((job) => ({ ...job, output_url: typeof job.output_asset_id === "string" ? urls.get(job.output_asset_id) : undefined }));
   }
 
   async createRenderJob(input: { id: string; workspaceId: string; projectId: string; shotId: string; template: string; templateVersion: number; specSnapshot: Json }) {
