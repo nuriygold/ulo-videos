@@ -144,6 +144,14 @@ export class SupabaseControlPlaneStore implements ControlPlaneStore {
     return data ? shotRecord(data) : null;
   }
 
+  async listRenderJobs(workspaceId: string, projectId?: string) {
+    let query = this.client.from("render_jobs").select("*").eq("workspace_id", workspaceId).order("created_at", { ascending: false });
+    if (projectId) query = query.eq("project_id", projectId);
+    const { data, error } = await query;
+    if (error) throw error;
+    return (data ?? []) as Record<string, unknown>[];
+  }
+
   async createRenderJob(input: { id: string; workspaceId: string; projectId: string; shotId: string; template: string; templateVersion: number; specSnapshot: Json }) {
     const { error } = await this.client.from("render_jobs").insert({ id: input.id, workspace_id: input.workspaceId, project_id: input.projectId, shot_id: input.shotId, template: input.template, template_version: input.templateVersion, spec_snapshot: input.specSnapshot, status: "queued", progress: 0, attempt: 1 });
     if (error) throw error;

@@ -22,6 +22,7 @@ export interface ControlPlaneStore {
   saveShot(input: Omit<ShotRecord, "createdAt" | "updatedAt"> & { workspaceId: string }): Promise<ShotRecord>;
   listShots(projectId: string, workspaceId: string): Promise<ShotRecord[]>;
   getShot(shotId: string, projectId: string, workspaceId: string): Promise<ShotRecord | null>;
+  listRenderJobs(workspaceId: string, projectId?: string): Promise<Record<string, unknown>[]>;
   createRenderJob(input: { id: string; workspaceId: string; projectId: string; shotId: string; template: string; templateVersion: number; specSnapshot: Record<string, unknown> }): Promise<void>;
   getRenderJob(id: string, workspaceId: string): Promise<Record<string, unknown> | null>;
   updateRenderJob(id: string, update: Record<string, unknown>): Promise<void>;
