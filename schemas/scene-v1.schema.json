@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ulo-videos.dev/schemas/scene-v1.schema.json",
+  "title": "Ulo Videos Scene v1",
+  "type": "object",
+  "required": ["template", "version", "source", "trigger", "background", "elements", "captions", "branding", "continuation", "output"],
+  "properties": {
+    "template": {"type": "string", "minLength": 1},
+    "version": {"const": 1},
+    "source": {"type": "object", "required": ["video"], "properties": {"video": {"type": "string", "minLength": 1}}, "additionalProperties": false},
+    "trigger": {"type": "object", "required": ["type", "value"], "properties": {"type": {"const": "timestamp"}, "value": {"type": "number", "minimum": 0}}, "additionalProperties": false},
+    "background": {"type": "object", "required": ["action"], "properties": {"action": {"const": "freeze"}}, "additionalProperties": false},
+    "elements": {"type": "array", "items": {"$ref": "#/$defs/character"}},
+    "captions": {"type": "object", "required": ["enabled", "style"], "properties": {"enabled": {"type": "boolean"}, "style": {"enum": ["none", "lower_third", "top", "center"]}}, "additionalProperties": false},
+    "branding": {"type": "object", "required": ["logo"], "properties": {"logo": {"type": "string", "minLength": 1}}, "additionalProperties": false},
+    "continuation": {"type": "object", "required": ["action"], "properties": {"action": {"const": "resume"}}, "additionalProperties": false},
+    "output": {"type": "object", "required": ["format", "width", "height", "fps"], "properties": {"format": {"const": "mp4"}, "width": {"type": "integer", "minimum": 1}, "height": {"type": "integer", "minimum": 1}, "fps": {"type": "integer", "minimum": 1}}, "additionalProperties": false}
+  },
+  "$defs": {
+    "character": {"type": "object", "required": ["id", "type", "asset", "position", "entrance", "performance"], "properties": {"id": {"type": "string", "minLength": 1}, "type": {"const": "character"}, "asset": {"type": "string", "minLength": 1}, "position": {"enum": ["foreground_left", "foreground_center", "foreground_right"]}, "entrance": {"type": "object", "required": ["type"], "properties": {"type": {"enum": ["pop_in", "fade_in", "slide_left", "slide_right"]}, "duration": {"type": "number", "exclusiveMinimum": 0}}, "additionalProperties": false}, "performance": {"type": "object", "required": ["gesture"], "properties": {"gesture": {"enum": ["shrug_and_point", "wave", "nod", "talk_idle"]}}, "additionalProperties": false}, "dialogue": {"type": "object", "required": ["text", "voice", "lip_sync"], "properties": {"text": {"type": "string"}, "voice": {"type": "string"}, "lip_sync": {"type": "string"}}, "additionalProperties": false}}, "additionalProperties": false}
+  },
+  "additionalProperties": false
+}

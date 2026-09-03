@@ -4,8 +4,5 @@
     "api/**/*.py": {
       "excludeFiles": "{tests/**,docs/**,examples/**,scripts/**,assets/**,build/**,HANDOFF.md}"
     }
-  },
-  "rewrites": [
-    { "source": "^/((?!api/).*)$", "destination": "/api?__p=/$1" }
-  ]
+  }
 }

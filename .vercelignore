@@ -7,3 +7,5 @@ assets/**
 build/**
 HANDOFF.md
 .gitignore
+node_modules/
+.next/
