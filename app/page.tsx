@@ -64,7 +64,7 @@ export default function Home() {
   }
 
   return <main className="workspace">
-    <header className="hero"><div><img className="brand-logo" src="/ulo-videos-logo.svg" alt="ulo-videos" /><p className="eyebrow">Anonymous workspace</p><h1>Build one precise interruption.</h1></div><p>Scene v1 turns a source clip, character, and cue into a deterministic render request. No account required; this workspace is tied to a secure browser cookie.</p></header>
+    <header className="hero"><div><img className="brand-logo" src="/ulo-videos-logo.svg" alt="ulo-videos" /><h1>Build one precise interruption.</h1></div><p>Scene v1 turns a source clip, character, and cue into a deterministic render request. No account required; this workspace is tied to a secure browser cookie.</p></header>
     <div className="workspace-grid">
       <section className="editor" aria-labelledby="editor-title">
         <div className="step-heading"><span>01</span><div><h2 id="editor-title">Create a project</h2><p>The project owns every shot and render in this browser workspace.</p></div></div>
