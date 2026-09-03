@@ -1,4 +1,4 @@
-"""Local HTTP application for the prompt-to-shot browser form.
+"""Local HTTP application for the ulo-videos browser form.
 
 `make_server` builds a stdlib `http.server` bound to a local interface. The
 form posts JSON whose fields are text; the server normalizes form-shaped
@@ -419,13 +419,13 @@ def make_wsgi_app(*, static_dir=None, project_root=None, toolchain=None):
 def main(argv=None):
     """Parse CLI arguments and serve the form until interrupted."""
     parser = argparse.ArgumentParser(
-        description="Serve the prompt-to-shot browser form and scene API."
+        description="Serve the ulo-videos browser form and scene API."
     )
     parser.add_argument("--host", default=DEFAULT_HOST, help="interface to bind")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="port to bind")
     args = parser.parse_args(argv)
     server = make_server(args.host, args.port)
-    print(f"prompt-to-shot form: http://{args.host}:{server.server_port}")
+    print(f"ulo-videos form: http://{args.host}:{server.server_port}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

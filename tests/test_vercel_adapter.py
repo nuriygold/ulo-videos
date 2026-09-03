@@ -18,9 +18,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from prompt_to_shot.renderers import Toolchain
-from prompt_to_shot.server import make_wsgi_app
-from prompt_to_shot.templates import compile_scene
+from ulo_videos.renderers import Toolchain
+from ulo_videos.server import make_wsgi_app
+from ulo_videos.templates import compile_scene
 
 ADAPTER_ENTRY = Path(__file__).resolve().parents[1] / "api" / "index.py"
 
@@ -81,7 +81,7 @@ class ServerlessTestCase(unittest.TestCase):
     """A function-style app whose toolchain finds nothing, like a deployment."""
 
     def setUp(self):
-        root = Path(tempfile.mkdtemp(prefix="prompt-to-shot-serverless-")).resolve()
+        root = Path(tempfile.mkdtemp(prefix="ulo-videos-serverless-")).resolve()
         self.addCleanup(shutil.rmtree, root, ignore_errors=True)
         self.project_root = root
         for relative in (
@@ -124,7 +124,7 @@ class AdapterEntryTests(unittest.TestCase):
         spec = importlib.util.spec_from_file_location("vercel_api_index", ADAPTER_ENTRY)
         module = importlib.util.module_from_spec(spec)
         previous = os.getcwd()
-        os.chdir(tempfile.mkdtemp(prefix="prompt-to-shot-cwd-"))
+        os.chdir(tempfile.mkdtemp(prefix="ulo-videos-cwd-"))
         try:
             spec.loader.exec_module(module)
         finally:

@@ -14,14 +14,14 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from prompt_to_shot.renderers import Toolchain
-from prompt_to_shot.server import (
+from ulo_videos.renderers import Toolchain
+from ulo_videos.server import (
     default_project_root,
     default_static_dir,
     make_server,
     normalize_form_payload,
 )
-from prompt_to_shot.templates import compile_scene, serialize_scene
+from ulo_videos.templates import compile_scene, serialize_scene
 
 
 def form_payload():
@@ -57,7 +57,7 @@ def typed_payload():
 
 class ServerTestCase(unittest.TestCase):
     def setUp(self):
-        root = Path(tempfile.mkdtemp(prefix="prompt-to-shot-server-")).resolve()
+        root = Path(tempfile.mkdtemp(prefix="ulo-videos-server-")).resolve()
         self.addCleanup(shutil.rmtree, root, ignore_errors=True)
         self.project_root = root
         for relative in (
@@ -362,7 +362,7 @@ class DefaultPathTests(unittest.TestCase):
     def test_project_root_is_the_parent_of_src(self):
         root = default_project_root()
 
-        self.assertTrue((root / "src" / "prompt_to_shot" / "server.py").is_file())
+        self.assertTrue((root / "src" / "ulo_videos" / "server.py").is_file())
 
     def test_static_dir_defaults_to_repo_templates_with_shipped_files(self):
         self.assertEqual(default_static_dir(), default_project_root() / "templates")

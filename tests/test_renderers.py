@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from prompt_to_shot.renderers import (
+from ulo_videos.renderers import (
     AssetPathError,
     CommandTimeoutError,
     MissingToolError,
@@ -18,7 +18,7 @@ from prompt_to_shot.renderers import (
     resolve_relative_path,
     run_command,
 )
-from prompt_to_shot.templates import compile_scene
+from ulo_videos.templates import compile_scene
 
 
 def scene_payload():
@@ -45,7 +45,7 @@ def scene_payload():
 class RenderersTestCase(unittest.TestCase):
     def setUp(self):
         # Resolve once so assertions match resolver output on symlinked temp dirs (macOS /var).
-        root = Path(tempfile.mkdtemp(prefix="prompt-to-shot-renderers-")).resolve()
+        root = Path(tempfile.mkdtemp(prefix="ulo-videos-renderers-")).resolve()
         self.addCleanup(shutil.rmtree, root, ignore_errors=True)
         self.root = root
 

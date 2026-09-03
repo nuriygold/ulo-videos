@@ -1,4 +1,4 @@
-# prompt-to-shot has zero Python package dependencies: the app and its tests
+# ulo-videos has zero Python package dependencies: the app and its tests
 # run on the Python standard library only (Python 3.11+). There is nothing to
 # install with pip for this project.
 #

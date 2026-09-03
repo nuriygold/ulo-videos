@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from prompt_to_shot.adapters import (
+from ulo_videos.adapters import (
     ADAPTER_TOOLS,
     PIPER_OUTPUT_NAME,
     RHUBARB_OUTPUT_NAME,
@@ -13,12 +13,12 @@ from prompt_to_shot.adapters import (
     plan_piper_speech,
     plan_rhubarb_lipsync,
 )
-from prompt_to_shot.renderers import (
+from ulo_videos.renderers import (
     AssetPathError,
     Toolchain,
     plan_blender_render as renderers_plan_blender_render,
 )
-from prompt_to_shot.templates import compile_scene
+from ulo_videos.templates import compile_scene
 
 
 def scene_payload():
@@ -45,7 +45,7 @@ def scene_payload():
 class AdaptersTestCase(unittest.TestCase):
     def setUp(self):
         # Resolve once so assertions match resolver output on symlinked temp dirs (macOS /var).
-        root = Path(tempfile.mkdtemp(prefix="prompt-to-shot-adapters-")).resolve()
+        root = Path(tempfile.mkdtemp(prefix="ulo-videos-adapters-")).resolve()
         self.addCleanup(shutil.rmtree, root, ignore_errors=True)
         self.root = root
 

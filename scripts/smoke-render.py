@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""End-to-end smoke render for the prompt-to-shot repository.
+"""End-to-end smoke render for the ulo-videos repository.
 
 `python3 scripts/smoke-render.py` is the repository's end-to-end gate. It runs
 from a plain checkout with no network access, no downloads, and no PYTHONPATH
@@ -54,14 +54,14 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from prompt_to_shot import adapters, renderers, server
-from prompt_to_shot.renderers import (
+from ulo_videos import adapters, renderers, server
+from ulo_videos.renderers import (
     MissingToolError,
     Toolchain,
     prepare_output,
     run_command,
 )
-from prompt_to_shot.templates import compile_scene, serialize_scene
+from ulo_videos.templates import compile_scene, serialize_scene
 
 EXAMPLE_NAME = "examples/lizard-insurance.json"
 SMOKE_PROJECT_NAME = "smoke-project"
@@ -101,7 +101,7 @@ def main(argv=None):
 def run(build_dir):
     """Execute the smoke stages; each stage prints its own status block."""
     project_root = (build_dir / SMOKE_PROJECT_NAME).resolve()
-    print("prompt-to-shot smoke render")
+    print("ulo-videos smoke render")
     print(f"repo: {REPO_ROOT}")
     print(f"build dir: {build_dir.resolve()}")
     print()

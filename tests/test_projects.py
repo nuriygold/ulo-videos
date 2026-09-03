@@ -18,9 +18,9 @@ import urllib.request
 from pathlib import Path
 from unittest import mock
 
-from prompt_to_shot import projects
-from prompt_to_shot.renderers import AssetPathError
-from prompt_to_shot.server import make_server
+from ulo_videos import projects
+from ulo_videos.renderers import AssetPathError
+from ulo_videos.server import make_server
 
 MEDIA_NAMES = (
     "clip.mp4",
@@ -39,7 +39,7 @@ MEDIA_NAMES = (
 
 class ProjectStorageTests(unittest.TestCase):
     def setUp(self):
-        root = Path(tempfile.mkdtemp(prefix="prompt-to-shot-projects-")).resolve()
+        root = Path(tempfile.mkdtemp(prefix="ulo-videos-projects-")).resolve()
         self.addCleanup(shutil.rmtree, root, ignore_errors=True)
         self.root = root
 
@@ -278,7 +278,7 @@ class ProjectStorageTests(unittest.TestCase):
         self.assertEqual(torn_reads, [])
 
     def test_assets_symlink_escaping_the_root_is_rejected(self):
-        outside = Path(tempfile.mkdtemp(prefix="prompt-to-shot-outside-")).resolve()
+        outside = Path(tempfile.mkdtemp(prefix="ulo-videos-outside-")).resolve()
         self.addCleanup(shutil.rmtree, outside, ignore_errors=True)
         (self.root / "assets").symlink_to(outside)
 
@@ -288,7 +288,7 @@ class ProjectStorageTests(unittest.TestCase):
 
 class UploadApiTests(unittest.TestCase):
     def setUp(self):
-        root = Path(tempfile.mkdtemp(prefix="prompt-to-shot-uploads-")).resolve()
+        root = Path(tempfile.mkdtemp(prefix="ulo-videos-uploads-")).resolve()
         self.addCleanup(shutil.rmtree, root, ignore_errors=True)
         self.project_root = root
         server = make_server("127.0.0.1", 0, project_root=root)
@@ -452,7 +452,7 @@ class UploadApiTests(unittest.TestCase):
         self.assertFalse((self.project_root / "assets").exists())
 
     def test_upload_through_an_escaping_assets_symlink_returns_400(self):
-        outside = Path(tempfile.mkdtemp(prefix="prompt-to-shot-outside-")).resolve()
+        outside = Path(tempfile.mkdtemp(prefix="ulo-videos-outside-")).resolve()
         self.addCleanup(shutil.rmtree, outside, ignore_errors=True)
         (self.project_root / "assets").symlink_to(outside)
 

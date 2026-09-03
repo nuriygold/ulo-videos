@@ -1,9 +1,9 @@
-"""Vercel entry point: the prompt-to-shot form and scene API as a WSGI app.
+"""Vercel entry point: the ulo-videos form and scene API as a WSGI app.
 
 Vercel's Python runtime (the `/api` directory contract) loads this file as a
 Vercel Function, and `app` handles every request through the catch-all rewrite
 in `vercel.json`. All routes are delegated to
-`prompt_to_shot.server.make_wsgi_app` — the same dispatch logic the local
+`ulo_videos.server.make_wsgi_app` — the same dispatch logic the local
 `http.server` app serves — so the deployed surface is the browser form, the
 scene compiler, the render planner, and toolchain status.
 
@@ -32,7 +32,7 @@ def _add_src_to_path():
     for base in (here.parent, Path.cwd()):
         candidate = base / "src"
         if (
-            (candidate / "prompt_to_shot" / "server.py").is_file()
+            (candidate / "ulo_videos" / "server.py").is_file()
             and str(candidate) not in sys.path
         ):
             sys.path.insert(0, str(candidate))
@@ -42,6 +42,6 @@ _add_src_to_path()
 
 # Imported after the path bootstrap above: this file is loaded by the hosting
 # runtime as a standalone script, not as part of a package.
-from prompt_to_shot.server import make_wsgi_app
+from ulo_videos.server import make_wsgi_app
 
 app = make_wsgi_app()

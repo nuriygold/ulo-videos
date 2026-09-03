@@ -1,4 +1,4 @@
-# prompt-to-shot
+# ulo-videos
 
 A local prompt-to-video app: a browser form authors a JSON scene specification,
 and the app turns it into deterministic, JSON-safe command plans for a
@@ -15,10 +15,10 @@ zero Python dependencies.
 ## How it works
 
 1. The form (or any client) posts a scene payload to `POST /api/spec`.
-2. `prompt_to_shot.templates.compile_scene` validates it against the
+2. `ulo_videos.templates.compile_scene` validates it against the
    `interruption_spokescharacter_v1` template and returns the compiled scene.
-3. `prompt_to_shot.renderers` plans the baseline FFmpeg preview command.
-4. `prompt_to_shot.adapters` plans the optional Piper speech, Rhubarb
+3. `ulo_videos.renderers` plans the baseline FFmpeg preview command.
+4. `ulo_videos.adapters` plans the optional Piper speech, Rhubarb
    lip-sync, and Blender character-plate steps, each with explicit capability
    status.
 
@@ -123,7 +123,7 @@ capability, mirroring how the captions pattern reports the `drawtext` filter:
 }
 ```
 
-`prompt_to_shot.adapters.adapter_status()` returns the one-call capability
+`ulo_videos.adapters.adapter_status()` returns the one-call capability
 report: per-tool availability for `ffmpeg`, `blender`, `piper`, `rhubarb`
 plus the captions capability. The browser's tool panel (`GET /api/tools`)
 lists the core `ffmpeg`/`blender` toolchain status.
@@ -133,8 +133,8 @@ lists the core `ffmpeg`/`blender` toolchain status.
 From the repository root:
 
 ```sh
-PYTHONPATH=src python3 -m prompt_to_shot            # http://127.0.0.1:8000
-PYTHONPATH=src python3 -m prompt_to_shot --port 8080
+PYTHONPATH=src python3 -m ulo_videos            # http://127.0.0.1:8000
+PYTHONPATH=src python3 -m ulo_videos --port 8080
 ```
 
 Endpoints:
@@ -172,7 +172,7 @@ Use a project name beginning with `ulo` (for example `ulo-videos`) when the
 CLI asks. Configuration lives in the repository:
 
 - `api/index.py` — the Vercel entry point: a WSGI callable that delegates
-  every route to `prompt_to_shot.server.make_wsgi_app`, with nothing
+  every route to `ulo_videos.server.make_wsgi_app`, with nothing
   Vercel-specific in the app itself.
 - `vercel.json` — the catch-all rewrite (`/(.*)` → `/api`) that serves the
   form at `/` through the function, plus `excludeFiles` so the bundle carries
@@ -220,14 +220,14 @@ PYTHONPATH=src python3 -m unittest discover -s tests
 
 ## Layout
 
-- `src/prompt_to_shot/schema.py` — scene contract primitives.
-- `src/prompt_to_shot/templates.py` — `compile_scene` / `serialize_scene`.
-- `src/prompt_to_shot/renderers.py` — `Toolchain`, command planning and
+- `src/ulo_videos/schema.py` — scene contract primitives.
+- `src/ulo_videos/templates.py` — `compile_scene` / `serialize_scene`.
+- `src/ulo_videos/renderers.py` — `Toolchain`, command planning and
   shell-free execution.
-- `src/prompt_to_shot/adapters.py` — optional Piper / Rhubarb / Blender
+- `src/ulo_videos/adapters.py` — optional Piper / Rhubarb / Blender
   adapter planning and capability status.
-- `src/prompt_to_shot/projects.py` — upload storage and manifests.
-- `src/prompt_to_shot/server.py` — stdlib HTTP application and browser form,
+- `src/ulo_videos/projects.py` — upload storage and manifests.
+- `src/ulo_videos/server.py` — stdlib HTTP application and browser form,
   with the shared request dispatcher and the WSGI adapter factory.
 - `api/index.py` — the Vercel function entry (see "Deploy the form to
   Vercel").

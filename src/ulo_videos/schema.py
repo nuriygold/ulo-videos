@@ -1,4 +1,4 @@
-"""Validation helpers for prompt-to-shot scene specifications."""
+"""Validation helpers for ulo-videos scene specifications."""
 
 
 class SceneValidationError(ValueError):

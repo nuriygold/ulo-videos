@@ -1,4 +1,4 @@
-# Handoff — Prompt-to-Shot
+# Handoff — ulo-videos
 
 Date: 2026-09-02
 
@@ -32,9 +32,9 @@ The original `career-ops` repository was not modified, except for its pre-existi
 - SDD ledger: `.superpowers/sdd/2026-09-02-prompt-to-shot-implementation/progress.md`
 - Task 1 worker was interrupted after writing files but before committing/reporting.
 - Existing Task 1 files:
-  - `src/prompt_to_shot/__init__.py`
-  - `src/prompt_to_shot/schema.py`
-  - `src/prompt_to_shot/templates.py`
+  - `src/ulo_videos/__init__.py`
+  - `src/ulo_videos/schema.py`
+  - `src/ulo_videos/templates.py`
   - `tests/test_schema.py`
 - Task 1 implementation validates the interruption template and serializes stable JSON.
 - Task 1 tests verified passing (5/5) on Python 3.14.6 by the recovering controller.

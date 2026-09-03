@@ -1,8 +1,8 @@
 import json
 import unittest
 
-from prompt_to_shot.schema import SceneValidationError
-from prompt_to_shot.templates import compile_scene, serialize_scene
+from ulo_videos.schema import SceneValidationError
+from ulo_videos.templates import compile_scene, serialize_scene
 
 
 def valid_payload():
