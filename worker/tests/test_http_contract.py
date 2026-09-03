@@ -47,7 +47,7 @@ class HttpContractTests(unittest.TestCase):
             connection.request("GET", "/healthz")
             response = connection.getresponse()
             self.assertEqual(response.status, 200)
-            self.assertEqual(json.loads(response.read()), {"ok": True, "mode": "external_worker", "capabilities": {"freezeResume": True, "logo": True, "captions": True, "character": True, "sourceAudio": False, "speech": False, "lipSync": False, "characterFormats": [".blend"]}, "ffmpeg": True, "blender": True, "rsvg_convert": True})
+            self.assertEqual(json.loads(response.read()), {"ok": True, "mode": "external_worker", "capabilities": {"freezeResume": True, "logo": True, "captions": True, "character": True, "sourceAudio": False, "speech": False, "lipSync": False, "characterFormats": [".blend", ".gltf", ".glb", ".fbx"]}, "ffmpeg": True, "blender": True, "rsvg_convert": True})
             connection.close()
         finally:
             server.shutdown()

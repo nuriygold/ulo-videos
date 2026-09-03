@@ -18,13 +18,22 @@ export type AssetUploadPolicy = {
   maximumSizeInBytes: number;
 };
 
+const CHARACTER_CONTENT_TYPES = {
+  ".blend": ["application/x-blender"],
+  ".gltf": ["model/gltf+json"],
+  ".glb": ["model/gltf-binary"],
+  ".fbx": ["application/octet-stream"],
+} as const;
+
+const CHARACTER_EXTENSIONS = Object.keys(CHARACTER_CONTENT_TYPES) as Array<keyof typeof CHARACTER_CONTENT_TYPES>;
+
 const UPLOAD_POLICIES: Record<BrowserUploadRole, AssetUploadPolicy> = {
   source_video: {
     allowedContentTypes: ["video/mp4", "video/quicktime", "video/webm"],
     maximumSizeInBytes: 5 * GIB,
   },
   character: {
-    allowedContentTypes: ["application/x-blender"],
+    allowedContentTypes: Object.values(CHARACTER_CONTENT_TYPES).flat(),
     maximumSizeInBytes: 2 * GIB,
   },
   logo: {
@@ -70,9 +79,25 @@ function safeFilename(value: unknown): string {
 }
 
 function validateFilenameForRole(role: BrowserUploadRole, filename: string): void {
-  if (role === "character" && !filename.toLowerCase().endsWith(".blend")) {
-    throw new Error("character assets must use a .blend filename");
+  if (role === "character" && !CHARACTER_EXTENSIONS.some((extension) => filename.toLowerCase().endsWith(extension))) {
+    throw new Error("character assets must use a .blend, .gltf, .glb, or .fbx filename");
   }
+}
+
+function characterExtension(filename: string): keyof typeof CHARACTER_CONTENT_TYPES {
+  const extension = CHARACTER_EXTENSIONS.find((item) => filename.toLowerCase().endsWith(item));
+  if (!extension) throw new Error("character assets must use a .blend, .gltf, .glb, or .fbx filename");
+  return extension;
+}
+
+export function characterMimeTypeForFilename(filename: string, contentType: string): string {
+  const allowed = CHARACTER_CONTENT_TYPES[characterExtension(filename)];
+  const normalized = contentType.toLowerCase().split(";", 1)[0].trim();
+  if (!normalized) return allowed[0];
+  if (!allowed.includes(normalized as never)) {
+    throw new Error(`character ${characterExtension(filename)} uploads must use ${allowed.join(" or ")}`);
+  }
+  return normalized;
 }
 
 export function uploadPolicyForRole(role: AssetRole): AssetUploadPolicy {
@@ -166,6 +191,7 @@ export function assetRecordFromUpload(input: {
   if (!policy.allowedContentTypes.includes(contentType)) {
     throw new Error(`completed upload content type is not allowed for ${input.intent.role}`);
   }
+  if (input.intent.role === "character") characterMimeTypeForFilename(input.intent.filename, contentType);
   if (!Number.isSafeInteger(input.bytes) || input.bytes <= 0 || input.bytes > policy.maximumSizeInBytes) {
     throw new Error("completed upload size is outside the allowed range");
   }

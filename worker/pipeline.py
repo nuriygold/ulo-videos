@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Union
+from typing import Optional, Union
 from urllib.parse import urlparse
 
 
@@ -14,9 +14,11 @@ FONT_FILE = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 class CompositePlan:
     source_url: str
     character_url: str
+    character_format: str
     logo_url: str
     source: Path
     character: Path
+    imported_blend: Optional[Path]
     logo_source: Path
     logo_image: Path
     rasterize_logo: bool
@@ -29,6 +31,13 @@ class CompositePlan:
 def _url_filename(url: str, fallback: str) -> str:
     name = Path(urlparse(url).path).name
     return name if name and name not in {".", ".."} else fallback
+
+
+def _character_format(url: str) -> str:
+    extension = Path(urlparse(url).path).suffix.lower()
+    if extension not in {".blend", ".gltf", ".glb", ".fbx"}:
+        raise ValueError("character.asset must use a .blend, .gltf, .glb, or .fbx URL")
+    return extension
 
 
 def _text(value: object, field: str) -> str:
@@ -96,7 +105,9 @@ def build_composite_plan(scene: dict, workdir: Union[str, Path]) -> CompositePla
         raise ValueError("captions.style is unsupported")
 
     source = root / "input" / _url_filename(source_url, "source.mp4")
-    blend = root / "input" / _url_filename(character_url, "character.blend")
+    character_format = _character_format(character_url)
+    character_file = root / "input" / _url_filename(character_url, f"character{character_format}")
+    imported_blend = None if character_format == ".blend" else root / "input" / "imported-character.blend"
     logo_source = root / "input" / _url_filename(logo_url, "logo.svg")
     rasterize_logo = logo_source.suffix.lower() == ".svg"
     logo_image = root / "input" / "logo.png" if rasterize_logo else logo_source
@@ -104,12 +115,20 @@ def build_composite_plan(scene: dict, workdir: Union[str, Path]) -> CompositePla
     output_path = root / "output.mp4"
     hold_frames = HOLD_SECONDS * fps
     blender_script = Path(__file__).with_name("blender_character.py").resolve()
-    blender_argv = [
-        "blender", "-b", str(blend), "-P", str(blender_script), "--",
+    blender_argv = ["blender", "-b"]
+    if character_format == ".blend":
+        blender_argv.append(str(character_file))
+    blender_argv.extend(["-P", str(blender_script), "--"])
+    if imported_blend is not None:
+        blender_argv.extend([
+            "--character", str(character_file), "--character-format", character_format,
+            "--imported-blend", str(imported_blend),
+        ])
+    blender_argv.extend([
         "--output-dir", str(character_frames.parent), "--width", str(width), "--height", str(height),
         "--fps", str(fps), "--frames", str(hold_frames), "--position", position,
         "--entrance", entrance, "--gesture", gesture,
-    ]
+    ])
     before = f"[before_source]trim=end={trigger},setpts=PTS-STARTPTS[before]"
     after = f"[after_source]trim=start={trigger},setpts=PTS-STARTPTS[after]"
     hold = (
@@ -137,4 +156,4 @@ def build_composite_plan(scene: dict, workdir: Union[str, Path]) -> CompositePla
         "-framerate", str(fps), "-start_number", "1", "-i", str(character_frames),
         "-filter_complex", filters, "-map", "[out]", "-an", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-shortest", str(output_path),
     ]
-    return CompositePlan(source_url, character_url, logo_url, source, blend, logo_source, logo_image, rasterize_logo, character_frames, blender_argv, ffmpeg_argv, str(output_path))
+    return CompositePlan(source_url, character_url, character_format, logo_url, source, character_file, imported_blend, logo_source, logo_image, rasterize_logo, character_frames, blender_argv, ffmpeg_argv, str(output_path))

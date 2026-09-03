@@ -50,6 +50,100 @@ class CompositePipelineTests(unittest.TestCase):
         self.assertIn("-shortest", plan.ffmpeg_argv)
         self.assertTrue(plan.output.endswith("/tmp/render-job/output.mp4"))
 
+    def test_gltf_character_uses_the_blender_import_path_and_keeps_the_uploaded_filename(self):
+        from worker.pipeline import build_composite_plan
+
+        scene = {
+            "source": {"video": "https://storage.example/source.mp4"}, "trigger": {"type": "timestamp", "value": 1},
+            "elements": [{"type": "character", "asset": "https://storage.example/Character%20Wave.gltf", "position": "foreground_center", "entrance": {"type": "pop_in"}, "performance": {"gesture": "wave"}, "dialogue": {"text": "Hi", "voice": "", "lip_sync": ""}}],
+            "captions": {"enabled": False, "style": "none"}, "branding": {"logo": "https://storage.example/logo.png"},
+            "output": {"width": 1920, "height": 1080, "fps": 30},
+        }
+
+        plan = build_composite_plan(scene, "/tmp/import-character")
+
+        self.assertTrue(str(plan.character).endswith("Character%20Wave.gltf"))
+        self.assertIn("--character-format", plan.blender_argv)
+        self.assertIn(".gltf", plan.blender_argv)
+        self.assertIn("--imported-blend", plan.blender_argv)
+        self.assertNotIn(str(plan.character), plan.blender_argv[:3])
+
+    def test_blender_gesture_normalization_keeps_unicode_word_boundaries(self):
+        import importlib.util
+        import sys
+        import types
+
+        fake_bpy = types.ModuleType("bpy")
+        previous_bpy = sys.modules.get("bpy")
+        sys.modules["bpy"] = fake_bpy
+        try:
+            path = Path(__file__).parents[1] / "blender_character.py"
+            spec = importlib.util.spec_from_file_location("blender_character_test", path)
+            module = importlib.util.module_from_spec(spec)
+            assert spec.loader is not None
+            spec.loader.exec_module(module)
+            self.assertEqual(module.normalized("  WＡVE---Idle  "), "wave_idle")
+        finally:
+            if previous_bpy is None:
+                del sys.modules["bpy"]
+            else:
+                sys.modules["bpy"] = previous_bpy
+
+    def test_blender_rejects_ambiguous_gesture_actions(self):
+        import importlib.util
+        import sys
+        import types
+
+        fake_bpy = types.ModuleType("bpy")
+        previous_bpy = sys.modules.get("bpy")
+        sys.modules["bpy"] = fake_bpy
+        try:
+            path = Path(__file__).parents[1] / "blender_character.py"
+            spec = importlib.util.spec_from_file_location("blender_character_test", path)
+            module = importlib.util.module_from_spec(spec)
+            assert spec.loader is not None
+            spec.loader.exec_module(module)
+            fake_bpy.context = types.SimpleNamespace(scene=types.SimpleNamespace(
+                objects=[types.SimpleNamespace(type="ARMATURE")], camera=object(),
+            ))
+            fake_bpy.data = types.SimpleNamespace(actions=[
+                types.SimpleNamespace(name="Wave Action"), types.SimpleNamespace(name="wave_action"),
+            ])
+            module.arguments = lambda: types.SimpleNamespace(gesture="wave action", character=None)
+            with self.assertRaisesRegex(Exception, "matches multiple actions"):
+                module.main()
+        finally:
+            if previous_bpy is None:
+                del sys.modules["bpy"]
+            else:
+                sys.modules["bpy"] = previous_bpy
+
+    def test_blender_rejects_gltf_external_resources(self):
+        import importlib.util
+        import json
+        import sys
+        import types
+
+        fake_bpy = types.ModuleType("bpy")
+        previous_bpy = sys.modules.get("bpy")
+        sys.modules["bpy"] = fake_bpy
+        try:
+            path = Path(__file__).parents[1] / "blender_character.py"
+            spec = importlib.util.spec_from_file_location("blender_character_test", path)
+            module = importlib.util.module_from_spec(spec)
+            assert spec.loader is not None
+            spec.loader.exec_module(module)
+            with tempfile.TemporaryDirectory() as temporary:
+                character = Path(temporary) / "character.gltf"
+                character.write_text(json.dumps({"buffers": [{"uri": "mesh.bin"}]}))
+                with self.assertRaisesRegex(RuntimeError, "external resources"):
+                    module.reject_external_gltf_resources(character, ".gltf")
+        finally:
+            if previous_bpy is None:
+                del sys.modules["bpy"]
+            else:
+                sys.modules["bpy"] = previous_bpy
+
     def test_execution_reports_blender_then_encoding_before_upload(self):
         from worker.service import execute_render_job
 
@@ -82,6 +176,37 @@ class CompositePipelineTests(unittest.TestCase):
         result = execute_render_job("rj_123", ControlPlane(), run_command=run_command)
         self.assertEqual(result["status"], "completed")
         self.assertEqual([update["status"] for update in updates], ["preparing", "downloading_assets", "building_scene", "rendering", "encoding", "uploading", "completed"])
+
+    def test_import_validation_failure_is_reported_as_render_failed(self):
+        from worker.service import execute_render_job
+
+        job = {
+            "id": "rj_123", "spec_snapshot": {
+                "source": {"video": "https://storage.example/source.mp4"}, "trigger": {"type": "timestamp", "value": 1},
+                "elements": [{"type": "character", "asset": "https://storage.example/character.gltf", "position": "foreground_center", "entrance": {"type": "pop_in"}, "performance": {"gesture": "wave"}, "dialogue": {"text": "Hi", "voice": "", "lip_sync": ""}}],
+                "captions": {"enabled": False, "style": "none"}, "branding": {"logo": "https://storage.example/logo.png"},
+                "output": {"width": 1920, "height": 1080, "fps": 30},
+            },
+        }
+        updates = []
+
+        class ControlPlane:
+            def get_job(self, job_id): return job
+            def update_job(self, job_id, **fields): updates.append(fields)
+            def download(self, url, destination):
+                Path(destination).parent.mkdir(parents=True, exist_ok=True)
+                Path(destination).write_bytes(b"asset")
+
+        def run_command(argv):
+            if argv[0] == "blender":
+                raise RuntimeError(".gltf character references external resources (mesh.bin)")
+
+        with self.assertRaisesRegex(RuntimeError, "external resources"):
+            execute_render_job("rj_123", ControlPlane(), run_command=run_command)
+        self.assertEqual(updates[-1], {
+            "status": "failed", "progress": 100, "error_code": "render_failed",
+            "error_message": ".gltf character references external resources (mesh.bin)",
+        })
 
     def test_completed_job_is_not_rendered_again_when_the_queue_retries(self):
         from worker.service import execute_render_job

@@ -27,10 +27,20 @@ test("setupStatus identifies only the missing dependency", () => {
 });
 
 test("renderer health selects external capabilities only when its health response is ready", async () => {
-  const health = await rendererHealthForQueue("https://renderer.example/healthz", async () => Response.json({ ok: true, mode: "external_worker" }));
-  assert.deepEqual(health, { mode: "external_worker", reachable: true });
+  const health = await rendererHealthForQueue("https://renderer.example/healthz", async () => Response.json({ ok: true, mode: "external_worker", capabilities: { characterFormats: [".blend", ".gltf", ".glb", ".fbx"] } }));
+  assert.deepEqual(health, { mode: "external_worker", reachable: true, characterFormats: [".blend", ".gltf", ".glb", ".fbx"] });
   assert.deepEqual(setupStatus({ SUPABASE_URL: "url", SUPABASE_SERVICE_ROLE_KEY: "key", BLOB_READ_WRITE_TOKEN: "blob", RENDER_QUEUE_URL: "queue", RENDER_WORKER_SECRET: "secret" }, health).renderer.capabilities, {
-    freezeResume: true, logo: true, captions: true, character: true, sourceAudio: false, speech: false, lipSync: false, characterFormats: [".blend"],
+    freezeResume: true, logo: true, captions: true, character: true, sourceAudio: false, speech: false, lipSync: false, characterFormats: [".blend", ".gltf", ".glb", ".fbx"],
   });
   assert.deepEqual(await rendererHealthForQueue("https://renderer.example/healthz", async () => Response.json({ ok: false, mode: "external_worker" }, { status: 503 })), { mode: "vercel_fallback", reachable: false });
+});
+
+test("renderer status does not advertise imported formats that the worker did not report", async () => {
+  const health = await rendererHealthForQueue("https://renderer.example/healthz", async () => Response.json({ ok: true, mode: "external_worker", capabilities: { characterFormats: [".blend"] } }));
+  assert.deepEqual(setupStatus({ RENDER_QUEUE_URL: "queue" }, health).renderer.capabilities.characterFormats, [".blend"]);
+});
+
+test("renderer status retains native Blender support while adding reported imported formats", async () => {
+  const health = await rendererHealthForQueue("https://renderer.example/healthz", async () => Response.json({ ok: true, mode: "external_worker", capabilities: { characterFormats: [".gltf"] } }));
+  assert.deepEqual(setupStatus({ RENDER_QUEUE_URL: "queue" }, health).renderer.capabilities.characterFormats, [".blend", ".gltf"]);
 });

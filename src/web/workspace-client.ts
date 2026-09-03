@@ -9,7 +9,7 @@ export type InterruptionDraft = {
 };
 
 import { upload } from "@vercel/blob/client";
-import { buildAssetBlobKey, type BrowserUploadRole } from "./asset-upload";
+import { buildAssetBlobKey, characterMimeTypeForFilename, type BrowserUploadRole } from "./asset-upload";
 
 export type DemoFileRole = "source_video" | "character" | "logo";
 
@@ -55,7 +55,7 @@ export async function fileForBrowserUpload(file: File, role: BrowserUploadRole, 
 export async function uploadAsset(file: File, workspaceId: string, projectId: string, role: BrowserUploadRole) {
   const body = await fileForBrowserUpload(file, role);
   const assetId = `a_${crypto.randomUUID()}`;
-  const contentType = role === "character" ? "application/x-blender" : body.type;
+  const contentType = role === "character" ? characterMimeTypeForFilename(body.name, body.type) : body.type;
   const intent = { assetId, workspaceId, projectId, role, filename: body.name };
   const pathname = buildAssetBlobKey(intent);
   const uploadBody = contentType && body.type !== contentType ? new File([body], body.name, { type: contentType }) : body;

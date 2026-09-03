@@ -102,7 +102,7 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
             status = self.health_checker()
             self._json(HTTPStatus.OK if status["ok"] else HTTPStatus.SERVICE_UNAVAILABLE, {
                 "ok": status["ok"], "mode": "external_worker",
-                "capabilities": {"freezeResume": True, "logo": True, "captions": True, "character": True, "sourceAudio": False, "speech": False, "lipSync": False, "characterFormats": [".blend"]},
+                "capabilities": {"freezeResume": True, "logo": True, "captions": True, "character": True, "sourceAudio": False, "speech": False, "lipSync": False, "characterFormats": [".blend", ".gltf", ".glb", ".fbx"]},
                 **status,
             })
         elif self.path == "/render-jobs":

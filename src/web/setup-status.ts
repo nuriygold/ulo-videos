@@ -5,7 +5,7 @@ export type RendererCapabilities = {
   sourceAudio: boolean; speech: boolean; lipSync: boolean; characterFormats: string[];
 };
 
-export type RendererHealth = { mode: RendererMode; reachable: boolean };
+export type RendererHealth = { mode: RendererMode; reachable: boolean; characterFormats?: string[] };
 
 export type SetupStatus = {
   ready: boolean;
@@ -14,7 +14,15 @@ export type SetupStatus = {
 };
 
 const FALLBACK_CAPABILITIES: RendererCapabilities = { freezeResume: true, logo: true, captions: true, character: false, sourceAudio: false, speech: false, lipSync: false, characterFormats: [] };
-const EXTERNAL_CAPABILITIES: RendererCapabilities = { freezeResume: true, logo: true, captions: true, character: true, sourceAudio: false, speech: false, lipSync: false, characterFormats: [".blend"] };
+const EXTERNAL_CHARACTER_FORMATS = [".blend", ".gltf", ".glb", ".fbx"];
+
+function externalCapabilities(reportedFormats: string[] | undefined): RendererCapabilities {
+  const characterFormats = [
+    ".blend",
+    ...EXTERNAL_CHARACTER_FORMATS.slice(1).filter((format) => reportedFormats?.includes(format)),
+  ];
+  return { freezeResume: true, logo: true, captions: true, character: true, sourceAudio: false, speech: false, lipSync: false, characterFormats };
+}
 
 export function fallbackRendererHealth(reachable = false): RendererHealth {
   return { mode: "vercel_fallback", reachable };
@@ -24,8 +32,13 @@ export async function rendererHealthForQueue(queueUrl: string | undefined, reque
   if (!queueUrl) return fallbackRendererHealth();
   try {
     const response = await request(queueUrl, { method: "GET", cache: "no-store", signal: AbortSignal.timeout(5_000) });
-    const health = await response.json() as { ok?: unknown; mode?: unknown };
-    if (response.ok && health.ok === true && health.mode === "external_worker") return { mode: "external_worker", reachable: true };
+    const health = await response.json() as { ok?: unknown; mode?: unknown; capabilities?: { characterFormats?: unknown } };
+    if (response.ok && health.ok === true && health.mode === "external_worker") {
+      const characterFormats = Array.isArray(health.capabilities?.characterFormats)
+        ? health.capabilities.characterFormats.filter((format): format is string => typeof format === "string")
+        : undefined;
+      return { mode: "external_worker", reachable: true, characterFormats };
+    }
     if (response.ok && health.ok === true && health.mode === "vercel_fallback") return fallbackRendererHealth(true);
   } catch { /* Setup status stays useful even when a live readiness probe fails. */ }
   return fallbackRendererHealth();
@@ -38,6 +51,6 @@ export function setupStatus(env: Record<string, string | undefined>, health: Ren
     queue: Boolean(env.RENDER_QUEUE_URL),
     worker: Boolean(env.RENDER_WORKER_SECRET),
   };
-  const capabilities = health.mode === "external_worker" ? EXTERNAL_CAPABILITIES : FALLBACK_CAPABILITIES;
+  const capabilities = health.mode === "external_worker" ? externalCapabilities(health.characterFormats) : FALLBACK_CAPABILITIES;
   return { ready: Object.values(services).every(Boolean) && health.reachable, services, renderer: { ...health, capabilities } };
 }
