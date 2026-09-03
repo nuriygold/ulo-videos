@@ -305,5 +305,42 @@ class ReadOnlyFilesystemTests(ServerlessTestCase):
         self.assertIn(b"<!doctype html>", body)
 
 
+class RewriteParamTests(unittest.TestCase):
+    """The vercel.json catch-all forwards non-/api paths with the original
+    path in a `__p` query parameter: the Python runtime hands rewritten
+    requests the destination path (proven against a live deployment), so the
+    original has to ride along explicitly. The entry point must rebuild the
+    real target before delegating to the shared dispatcher."""
+
+    @classmethod
+    def setUpClass(cls):
+        spec = importlib.util.spec_from_file_location(
+            "vercel_api_index_rewrite", ADAPTER_ENTRY
+        )
+        cls.module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.module)
+
+    def test_rewrite_param_serves_the_form(self):
+        status, headers, body = invoke(self.module.app, "/api", query="__p=/")
+        self.assertEqual(status, 200)
+        self.assertTrue(headers["Content-Type"].startswith("text/html"))
+        self.assertIn(b"<!doctype html>", body)
+
+    def test_rewrite_param_serves_scripts_with_types(self):
+        for path, kind in (("app.js", "text/javascript"), ("styles.css", "text/css")):
+            status, headers, _ = invoke(self.module.app, "/api", query=f"__p=/{path}")
+            self.assertEqual(status, 200, path)
+            self.assertTrue(headers["Content-Type"].startswith(kind), path)
+
+    def test_rewrite_param_preserves_the_rest_of_the_query(self):
+        status, _, _ = invoke(self.module.app, "/api", query="__p=/&preview=1")
+        self.assertEqual(status, 200)
+
+    def test_native_api_routes_ignore_the_param(self):
+        status, _, body = invoke(self.module.app, "/api/tools", query="__p=/")
+        self.assertEqual(status, 200)
+        self.assertIn("ffmpeg", json.loads(body))
+
+
 if __name__ == "__main__":
     unittest.main()

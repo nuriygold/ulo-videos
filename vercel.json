@@ -6,9 +6,6 @@
     }
   },
   "rewrites": [
-    { "source": "/", "destination": "/templates/index.html" },
-    { "source": "/index.html", "destination": "/templates/index.html" },
-    { "source": "/app.js", "destination": "/templates/app.js" },
-    { "source": "/styles.css", "destination": "/templates/styles.css" }
+    { "source": "^/((?!api/).*)$", "destination": "/api?__p=/$1" }
   ]
 }

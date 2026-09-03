@@ -174,12 +174,14 @@ CLI asks. Configuration lives in the repository:
 - `api/index.py` — the Vercel entry point: a WSGI callable that delegates
   every route to `ulo_videos.server.make_wsgi_app`, with nothing
   Vercel-specific in the app itself.
-- `vercel.json` — CDN rewrites that serve the form and its scripts at `/`,
-  `/app.js`, and `/styles.css` straight from the repository's `templates/`
-  files, while the `/api/*` routes reach the function natively; plus
-  `excludeFiles` that keeps tests, docs, examples, scripts, media assets,
-  and build output out of the function bundle. Anything else in the
-  repository rides along inert.
+- `vercel.json` — a catch-all rewrite that forwards every non-`/api` path to
+  the function with the original path in a `__p` query parameter (the Python
+  runtime hands rewritten requests the destination path, so the original rides
+  along explicitly), plus `excludeFiles` that keeps tests, docs, examples,
+  scripts, media assets, and build output out of the function bundle.
+- `.vercelignore` — keeps tests, docs, examples, scripts, media assets, and
+  build output out of the upload entirely, so the deployment carries only
+  what it serves.
 - `.python-version` — pins the runtime to Python 3.14, matching local
   development. The function stays standard-library only; `requirements.txt`
   documents zero Python dependencies.
@@ -208,12 +210,11 @@ What requires the local machine:
   never reach the app there.
 
 Everything else — validation, canonical JSON, and the 400/404/405/413/422
-error semantics of the API surface — is shared behavior, because both the
-local handler and the deployed function call the same dispatcher. Two
-deployment nuances: unknown non-API paths 404 at the CDN edge rather than
-through the dispatcher's JSON, and asset paths resolve after the ffmpeg
-requirement is checked, so on a host without ffmpeg a malformed asset path
-surfaces as a named `plan_error` rather than a validation error.
+error semantics — is shared behavior, because both the local handler and the
+deployed function call the same dispatcher. One deployment nuance: asset
+paths resolve after the ffmpeg requirement is checked, so on a host without
+ffmpeg a malformed asset path surfaces as a named `plan_error` rather than a
+validation error.
 
 ## Run the tests
 
