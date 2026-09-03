@@ -94,31 +94,20 @@ class CompositePipelineTests(unittest.TestCase):
         result = execute_render_job("rj_123", ControlPlane(), run_command=lambda argv: self.fail("completed job must not run"))
         self.assertEqual(result, {"jobId": "rj_123", "status": "completed", "progress": 100, "outputAssetId": "asset_rj_123"})
 
-    def test_requested_voice_or_lip_sync_fails_before_assets_are_downloaded(self):
-        from worker.service import execute_render_job
+    def test_legacy_voice_and_lip_sync_values_still_plan_a_silent_captioned_render(self):
+        from worker.pipeline import build_composite_plan
 
-        job = {
-            "id": "rj_voice", "workspace_id": "w_123", "project_id": "p_123",
-            "spec_snapshot": {
-                "source": {"video": "https://storage.example/source.mp4"},
-                "trigger": {"type": "timestamp", "value": 1},
-                "elements": [{"type": "character", "asset": "https://storage.example/lizard.blend", "position": "foreground_right", "entrance": {"type": "pop_in"}, "performance": {"gesture": "wave"}, "dialogue": {"text": "Speak", "voice": "alloy", "lip_sync": "rhubarb"}}],
-                "captions": {"enabled": True, "style": "lower_third"},
-                "branding": {"logo": "https://storage.example/logo.svg"},
-                "output": {"width": 1920, "height": 1080, "fps": 30},
-            },
+        scene = {
+            "source": {"video": "https://storage.example/source.mp4"}, "trigger": {"type": "timestamp", "value": 1},
+            "elements": [{"type": "character", "asset": "https://storage.example/lizard.blend", "position": "foreground_right", "entrance": {"type": "pop_in"}, "performance": {"gesture": "wave"}, "dialogue": {"text": "Speak", "voice": "alloy", "lip_sync": "rhubarb"}}],
+            "captions": {"enabled": True, "style": "lower_third"}, "branding": {"logo": "https://storage.example/logo.svg"},
+            "output": {"width": 1920, "height": 1080, "fps": 30},
         }
-        updates = []
-        case = self
 
-        class ControlPlane:
-            def get_job(self, job_id): return job
-            def update_job(self, job_id, **fields): updates.append(fields)
-            def download(self, url, destination): case.fail("unsupported performance must fail before download")
-
-        with self.assertRaisesRegex(Exception, "unsupported_performance"):
-            execute_render_job("rj_voice", ControlPlane(), run_command=lambda argv: self.fail("unsupported performance must not run commands"))
-        self.assertEqual(updates[-1]["error_code"], "unsupported_performance")
+        plan = build_composite_plan(scene, "/tmp/legacy-voice")
+        filters = plan.ffmpeg_argv[plan.ffmpeg_argv.index("-filter_complex") + 1]
+        self.assertIn("drawtext=text='Speak'", filters)
+        self.assertIn("-an", plan.ffmpeg_argv)
 
     def test_raster_logo_is_used_directly_without_svg_conversion(self):
         from worker.pipeline import build_composite_plan

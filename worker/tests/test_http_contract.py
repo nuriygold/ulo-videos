@@ -30,8 +30,28 @@ class HttpContractTests(unittest.TestCase):
 
         self.assertEqual(
             executable_status(which=lambda command: None, run=lambda argv: None),
-            {"ok": False, "ffmpeg": False, "blender": False},
+            {"ok": False, "ffmpeg": False, "blender": False, "rsvg_convert": False},
         )
+
+    def test_health_is_unauthenticated_and_requires_ffmpeg_blender_and_rsvg_convert(self):
+        from worker.service import RenderRequestHandler
+
+        class Handler(RenderRequestHandler):
+            health_checker = staticmethod(lambda: {"ok": True, "ffmpeg": True, "blender": True, "rsvg_convert": True})
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            connection = HTTPConnection("127.0.0.1", server.server_address[1], timeout=3)
+            connection.request("GET", "/healthz")
+            response = connection.getresponse()
+            self.assertEqual(response.status, 200)
+            self.assertEqual(json.loads(response.read()), {"ok": True, "mode": "external_worker", "capabilities": {"freezeResume": True, "logo": True, "captions": True, "character": True, "sourceAudio": False, "speech": False, "lipSync": False, "characterFormats": [".blend"]}, "ffmpeg": True, "blender": True, "rsvg_convert": True})
+            connection.close()
+        finally:
+            server.shutdown()
+            server.server_close()
 
     def test_post_only_accepts_render_jobs_path_and_completes_synchronously(self):
         from worker.service import RenderRequestHandler
@@ -41,7 +61,7 @@ class HttpContractTests(unittest.TestCase):
         class Handler(RenderRequestHandler):
             control_plane_factory = ControlPlane
             render_executor = staticmethod(lambda job_id, control_plane: {"jobId": job_id, "status": "completed"})
-            health_checker = staticmethod(lambda: {"ok": True, "ffmpeg": True, "blender": True})
+            health_checker = staticmethod(lambda: {"ok": True, "ffmpeg": True, "blender": True, "rsvg_convert": True})
 
         server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -78,6 +98,8 @@ class HttpContractTests(unittest.TestCase):
         self.assertIn("COPY worker /app/worker", dockerfile)
         self.assertIn("blender-${BLENDER_VERSION}-linux-x64.tar.xz", dockerfile)
         self.assertIn("a31f524fa99a527d3d52b7f5aaa68c34e1a19d5a1c9473f79c5cc610fd5b10e9", dockerfile)
+        self.assertIn("FROM --platform=linux/amd64", dockerfile)
+        self.assertIn('test "${TARGETARCH}" = "amd64"', dockerfile)
         self.assertIn("worker/.env", dockerignore)
         self.assertIn(".env", dockerignore)
 

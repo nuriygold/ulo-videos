@@ -1,7 +1,7 @@
 import json
 import unittest
 
-from ulo_videos.cloud_worker import download_request, queue_message, ffmpeg_command
+from ulo_videos.cloud_worker import fallback_health, download_request, queue_message, ffmpeg_command
 
 
 class CloudWorkerContractTests(unittest.TestCase):
@@ -11,6 +11,13 @@ class CloudWorkerContractTests(unittest.TestCase):
             queue_message(b"{}", "Bearer secret", "secret")
         with self.assertRaises(PermissionError):
             queue_message(b'{"renderJobId":"rj_123"}', "Bearer wrong", "secret")
+
+    def test_fallback_health_describes_only_the_stages_it_applies(self):
+        self.assertEqual(fallback_health(), {
+            "ok": True,
+            "mode": "vercel_fallback",
+            "capabilities": {"freezeResume": True, "logo": True, "captions": True, "character": False, "sourceAudio": False, "speech": False, "lipSync": False, "characterFormats": []},
+        })
 
     def test_ffmpeg_command_is_deterministic_mp4_output(self):
         command = ffmpeg_command("/tmp/input.mp4", "/tmp/output.mp4", 7.4, 1920, 1080, 30)

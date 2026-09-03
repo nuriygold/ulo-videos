@@ -29,13 +29,37 @@ export async function loadDemoFile(role: DemoFileRole, request: typeof fetch = f
   return new File([await response.blob()], descriptor.filename, { type: descriptor.mimeType });
 }
 
+function isSvgLogo(file: File): boolean { return file.type === "image/svg+xml" || file.name.toLowerCase().endsWith(".svg"); }
+
+export async function rasterizeSvgLogo(file: File): Promise<File> {
+  const imageUrl = URL.createObjectURL(file);
+  try {
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const next = new Image();
+      next.onload = () => resolve(next); next.onerror = () => reject(new Error("SVG logo could not be rasterized.")); next.src = imageUrl;
+    });
+    const canvas = document.createElement("canvas");
+    canvas.width = image.naturalWidth || image.width; canvas.height = image.naturalHeight || image.height;
+    if (!canvas.width || !canvas.height) throw new Error("SVG logo has no drawable dimensions.");
+    canvas.getContext("2d")?.drawImage(image, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+    if (!blob) throw new Error("SVG logo could not be converted to PNG.");
+    return new File([blob], file.name.replace(/\.svg$/i, ".png"), { type: "image/png" });
+  } finally { URL.revokeObjectURL(imageUrl); }
+}
+
+export async function fileForBrowserUpload(file: File, role: BrowserUploadRole, rasterize = rasterizeSvgLogo): Promise<File> {
+  return role === "logo" && isSvgLogo(file) ? rasterize(file) : file;
+}
+
 export async function uploadAsset(file: File, workspaceId: string, projectId: string, role: BrowserUploadRole) {
+  const body = await fileForBrowserUpload(file, role);
   const assetId = `a_${crypto.randomUUID()}`;
-  const contentType = role === "character" ? "application/x-blender" : file.type;
-  const intent = { assetId, workspaceId, projectId, role, filename: file.name };
+  const contentType = role === "character" ? "application/x-blender" : body.type;
+  const intent = { assetId, workspaceId, projectId, role, filename: body.name };
   const pathname = buildAssetBlobKey(intent);
-  const body = contentType && file.type !== contentType ? new File([file], file.name, { type: contentType }) : file;
-  const blob = await upload(pathname, body, { access: "public", handleUploadUrl: "/api/assets/upload", clientPayload: JSON.stringify(intent), contentType, multipart: file.size > 25 * 1024 * 1024 });
+  const uploadBody = contentType && body.type !== contentType ? new File([body], body.name, { type: contentType }) : body;
+  const blob = await upload(pathname, uploadBody, { access: "public", handleUploadUrl: "/api/assets/upload", clientPayload: JSON.stringify(intent), contentType, multipart: uploadBody.size > 25 * 1024 * 1024 });
   return blob.url;
 }
 

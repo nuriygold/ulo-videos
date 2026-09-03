@@ -11,7 +11,7 @@ from pathlib import Path
 
 from .control_plane import SupabaseBlobControlPlane
 from .http_contract import authenticate_render_request
-from .pipeline import UnsupportedPerformanceError, build_composite_plan
+from .pipeline import build_composite_plan
 
 
 def _run(argv):
@@ -54,8 +54,7 @@ def execute_render_job(job_id, control_plane, *, worker_id=None, run_command=_ru
         control_plane.update_job(job_id, **completed)
         return {"jobId": job_id, "outputAssetId": output_asset_id, **completed}
     except Exception as error:
-        error_code = "unsupported_performance" if isinstance(error, UnsupportedPerformanceError) else "render_failed"
-        failure = {"status": "failed", "progress": 100, "error_code": error_code, "error_message": str(error)[:2000]}
+        failure = {"status": "failed", "progress": 100, "error_code": "render_failed", "error_message": str(error)[:2000]}
         control_plane.update_job(job_id, **failure)
         raise
     finally:
@@ -80,7 +79,8 @@ def executable_status(*, which=shutil.which, run=subprocess.run):
 
     ffmpeg = ready("ffmpeg", ["-version"])
     blender = ready("blender", ["--background", "--version"])
-    return {"ok": ffmpeg and blender, "ffmpeg": ffmpeg, "blender": blender}
+    rsvg_convert = ready("rsvg-convert", ["--version"])
+    return {"ok": ffmpeg and blender and rsvg_convert, "ffmpeg": ffmpeg, "blender": blender, "rsvg_convert": rsvg_convert}
 
 
 class RenderRequestHandler(BaseHTTPRequestHandler):
@@ -100,7 +100,11 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/healthz":
             status = self.health_checker()
-            self._json(HTTPStatus.OK if status["ok"] else HTTPStatus.SERVICE_UNAVAILABLE, status)
+            self._json(HTTPStatus.OK if status["ok"] else HTTPStatus.SERVICE_UNAVAILABLE, {
+                "ok": status["ok"], "mode": "external_worker",
+                "capabilities": {"freezeResume": True, "logo": True, "captions": True, "character": True, "sourceAudio": False, "speech": False, "lipSync": False, "characterFormats": [".blend"]},
+                **status,
+            })
         elif self.path == "/render-jobs":
             self._method_not_allowed()
         else:

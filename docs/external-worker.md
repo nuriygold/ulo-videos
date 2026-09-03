@@ -45,10 +45,11 @@ Provide an unauthenticated, side-effect-free health route:
 
 ```text
 GET /healthz
-200 {"ok":true,"ffmpeg":true,"blender":true}
+200 {"ok":true,"ffmpeg":true,"blender":true,"rsvg_convert":true}
 ```
 
-The readiness check should report `503` until both `ffmpeg` and `blender` are
+The readiness check should report `503` until `ffmpeg`, `blender`, and
+`rsvg-convert` are
 available on `PATH`. Piper and Rhubarb may be reported separately when those
 stages are enabled. Do not use `/healthz` to reveal environment values.
 
@@ -80,11 +81,11 @@ queued → preparing → downloading_assets → building_scene → rendering
 ```
 
 The worker should delete its temporary job directory on success and failure.
-It must not mark a job complete if the selected character, dialogue, captions,
-or branding values were ignored. The current image supports text captions, not
-spoken dialogue: a non-empty `voice` or `lip_sync` is rejected before asset
-download with `error_code: unsupported_performance`. Captions do not stand in
-for a requested Piper/Rhubarb performance.
+It must not mark a job complete if the selected character, captions, or
+branding values were ignored. The current image supports text captions, not
+spoken dialogue: legacy non-empty `voice` or `lip_sync` values are tolerated
+and render the supported silent, captioned result. Captions do not stand in for
+a requested Piper/Rhubarb performance.
 
 ## Configuration by service
 
@@ -162,7 +163,11 @@ submit it once, and verify the job advances through Supabase to `completed`,
 has an `output_asset_id`, and its `assets.blob_url` is a playable MP4. Use a
 new job for each retry; the snapshot is intentionally immutable.
 
-## Deploy and switch the queue endpoint
+## Future deployment and queue switch
+
+The synchronous endpoint is suitable for testing, but it must not be used as
+the production dispatcher for long renders until a durable provider queue is
+available. Once that queue exists:
 
 1. Deploy the image to a container platform that supports long-running CPU/GPU
    workloads, ephemeral disk sized for source assets and frames, and an HTTPS

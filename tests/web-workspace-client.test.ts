@@ -4,6 +4,7 @@ import {
   buildInterruptionScene,
   createProject,
   demoFileDescriptor,
+  fileForBrowserUpload,
   saveShot,
   submitRender,
   type InterruptionDraft,
@@ -18,8 +19,8 @@ const draft: InterruptionDraft = {
   entrance: "slide_left",
   gesture: "shrug_and_point",
   dialogueText: "Wait — there is a clearer way.",
-  voice: "alloy",
-  lipSync: "rhubarb",
+  voice: "",
+  lipSync: "",
   captionsEnabled: true,
   captionStyle: "lower_third",
   logo: "https://example.com/logo.svg",
@@ -42,7 +43,7 @@ test("buildInterruptionScene maps editor state to the deterministic Scene v1 con
       position: "foreground_right",
       entrance: { type: "slide_left" },
       performance: { gesture: "shrug_and_point" },
-      dialogue: { text: "Wait — there is a clearer way.", voice: "alloy", lip_sync: "rhubarb" },
+      dialogue: { text: "Wait — there is a clearer way.", voice: "", lip_sync: "" },
     }],
     captions: { enabled: true, style: "lower_third" },
     branding: { logo: "https://example.com/logo.svg" },
@@ -85,4 +86,18 @@ test("demo file descriptors point at bundled assets with the correct upload MIME
   assert.deepEqual(demoFileDescriptor("source_video"), { url: "/demo/demo-source.mp4", filename: "demo-source.mp4", mimeType: "video/mp4" });
   assert.deepEqual(demoFileDescriptor("character"), { url: "/demo/demo-character.blend", filename: "demo-character.blend", mimeType: "application/x-blender" });
   assert.deepEqual(demoFileDescriptor("logo"), { url: "/demo/demo-logo.svg", filename: "demo-logo.svg", mimeType: "image/svg+xml" });
+});
+
+test("browser uploads rasterize SVG logos but preserve every other upload", async () => {
+  const svg = { name: "brand.svg", type: "image/svg+xml" } as File;
+  const png = { name: "brand.png", type: "image/png" } as File;
+  let rasterized: File | undefined;
+
+  assert.equal(await fileForBrowserUpload(svg, "logo", async (file) => {
+    rasterized = file;
+    return png;
+  }), png);
+  assert.equal(rasterized, svg);
+  assert.equal(await fileForBrowserUpload(png, "logo", async () => { throw new Error("PNG must not be rasterized"); }), png);
+  assert.equal(await fileForBrowserUpload(svg, "source_video", async () => { throw new Error("only logos are rasterized"); }), svg);
 });

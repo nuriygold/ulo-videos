@@ -10,10 +10,6 @@ HOLD_SECONDS = 2
 FONT_FILE = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 
 
-class UnsupportedPerformanceError(ValueError):
-    """Raised before rendering when a scene asks for unavailable speech stages."""
-
-
 @dataclass(frozen=True)
 class CompositePlan:
     source_url: str
@@ -94,10 +90,6 @@ def build_composite_plan(scene: dict, workdir: Union[str, Path]) -> CompositePla
     gesture = _text((character.get("performance") or {}).get("gesture"), "character.performance.gesture")
     dialogue = character.get("dialogue") or {}
     caption_text = _text(dialogue.get("text"), "character.dialogue.text")
-    if any(isinstance(dialogue.get(field), str) and dialogue[field].strip() for field in ("voice", "lip_sync")):
-        raise UnsupportedPerformanceError(
-            "unsupported_performance: voice and lip_sync require installed Piper, Rhubarb, and a configured voice asset"
-        )
     captions = scene.get("captions") or {}
     caption_style = captions.get("style") if captions.get("enabled") else "none"
     if caption_style not in {"none", "lower_third", "top", "center"}:

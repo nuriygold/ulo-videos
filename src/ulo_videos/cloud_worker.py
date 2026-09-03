@@ -14,6 +14,17 @@ from urllib.request import Request, urlopen
 from .renderers import _escape_drawtext_text
 
 
+def fallback_health():
+    return {
+        "ok": True,
+        "mode": "vercel_fallback",
+        "capabilities": {
+            "freezeResume": True, "logo": True, "captions": True, "character": False,
+            "sourceAudio": False, "speech": False, "lipSync": False, "characterFormats": [],
+        },
+    }
+
+
 def download_request(url):
     return Request(url, headers={"User-Agent": "ulo-videos-render-worker/1.0"})
 

@@ -11,7 +11,7 @@ records as the current control plane.
 `POST /render-jobs` validates `Authorization: Bearer $RENDER_WORKER_SECRET`
 and runs the job synchronously, returning `200` only after the terminal job
 state is written. `GET /healthz` is an unauthenticated readiness check and
-returns `503` until both FFmpeg and Blender execute successfully.
+returns `503` until FFmpeg, Blender, and `rsvg-convert` execute successfully.
 
 ## What this worker renders
 
@@ -29,9 +29,8 @@ For the submitted immutable Scene v1 snapshot it:
    updates `render_jobs.output_asset_id` and the usual staged status.
 
 Caption text is currently rendered only when captions are enabled. Piper and
-Rhubarb are not installed: a non-empty `voice` or `lip_sync` fails before asset
-download with `error_code: unsupported_performance`; captions never stand in
-for spoken dialogue.
+Rhubarb are not installed, so `voice` and `lip_sync` are ignored for legacy
+snapshots and the worker produces the supported silent, captioned result.
 
 ## Build and run
 
@@ -55,10 +54,11 @@ diagnostics. Do not put any of these values in source control.
 
 ## Control-plane integration
 
-Deploy this container to a service that exposes its HTTPS `/render-jobs`
-endpoint, then set Vercel's existing `RENDER_QUEUE_URL` to that HTTPS URL. Keep
-`RENDER_WORKER_SECRET` identical in Vercel and in this container. No queue
-message, database schema, browser code, or Vercel Function changes are needed.
+Use the synchronous `/render-jobs` endpoint for local and integration testing
+only. Do not configure it as Vercel's production `RENDER_QUEUE_URL` for long
+renders until a durable provider queue exists. Keep `RENDER_WORKER_SECRET`
+identical wherever the eventual dispatcher and worker run; the queue message,
+database schema, browser code, and Vercel Function contract remain unchanged.
 
 The worker relies on the existing immutable snapshot fields: `source.video`,
 the first character element's `asset`, `branding.logo`, `trigger`, `captions`,

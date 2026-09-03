@@ -14,4 +14,7 @@ test("workspace explains the complete interrupted-video workflow", () => {
   assert.match(markup, /Accepted logo formats:.*PNG, JPEG, WebP, or SVG/);
   assert.match(markup, /select.*Submit render/);
   assert.match(markup, /finished video/);
+  assert.match(markup, /Vercel fallback applies freeze\/resume, logo, and captions/);
+  assert.match(markup, /Character, source audio, voice, and lip-sync are unavailable/);
+  assert.match(markup, /Voice reference \(unavailable\)/);
 });
