@@ -9,12 +9,18 @@ const downloadLink = document.querySelector("#download-link");
 const submitButton = form.querySelector("button[type='submit']");
 
 const IS_LOCAL = ["localhost", "127.0.0.1", "::1"].includes(location.hostname);
+const CAN_PROBE =
+  typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function";
+
+let localRenderer = null;
 
 const RESOLVE = {
   ffmpegLocal:
     "Resolve: install FFmpeg (brew install ffmpeg), then restart this app's server and reload.",
   blenderLocal:
     "Resolve: install Blender (brew install --cask blender), then restart this app's server and reload.",
+  planFfmpeg:
+    "Resolve: install FFmpeg (brew install ffmpeg) on the machine running the app, then resubmit. The scene compiled fine — download the JSON above.",
   deployed:
     "Resolve: this is the deployed copy — its server has no media tools. Run the app locally (PYTHONPATH=src python3 -m ulo_videos) to render with this machine's tools.",
   missingAsset:
@@ -24,19 +30,21 @@ const RESOLVE = {
   planError:
     "Resolve: read the reason above — it names what the render host is missing.",
   submit: "Resolve: fix the issue named above, then submit again.",
+  toolStatus:
+    "Resolve: start the app's server (PYTHONPATH=src python3 -m ulo_videos) and reload this page.",
   startServer:
-    "Resolve: start the app's server (PYTHONPATH=src python3 -m ulo_videos), then try again.",
+    "Resolve: start the app's server (PYTHONPATH=src python3 -m ulo_videos), then submit again.",
   localRenderer:
-    "Resolve: start the local app (PYTHONPATH=src python3 -m ulo_videos) on this machine and reload — this panel will then report your machine's real toolchain.",
+    "Resolve: on this machine, install any missing tools listed below, run the app (PYTHONPATH=src python3 -m ulo_videos) in a terminal, and reload this page — it will then detect the local renderer and can render through it.",
 };
-
-const LOCAL_PROBE_PORTS = [8000, 8080, 8777];
 
 const DOWNLOADS = {
   ffmpeg: { url: "https://ffmpeg.org/download.html", label: "Download FFmpeg" },
   blender: { url: "https://www.blender.org/download/", label: "Download Blender" },
   python: { url: "https://www.python.org/downloads/", label: "Download Python" },
 };
+
+const LOCAL_PROBE_PORTS = [8000, 8080, 8777];
 
 function buildPayload(formElement) {
   const payload = {};
@@ -73,6 +81,18 @@ function resolutionLine(text, links) {
   return line;
 }
 
+function linkLine(href, label) {
+  const line = document.createElement("p");
+  const anchor = document.createElement("a");
+  anchor.className = "download-link";
+  anchor.href = href;
+  anchor.target = "_blank";
+  anchor.rel = "noopener noreferrer";
+  anchor.textContent = label;
+  line.append(anchor);
+  return line;
+}
+
 function showError(message, resolution, links) {
   const messageLine = document.createElement("p");
   messageLine.textContent = message;
@@ -93,14 +113,20 @@ function planLine(text, className) {
   return line;
 }
 
+function artifactUrl(download) {
+  if (!download) return null;
+  const base = localRenderer ? `http://127.0.0.1:${localRenderer.port}` : "";
+  return `${base}/api/artifact?path=${encodeURIComponent(download)}`;
+}
+
 function renderPlan(plan, planError) {
   if (!plan) {
     planSummary.append(planLine(`Plan unavailable: ${planError || "unknown error"}`, "plan-missing"));
     if (planError && planError.includes("ffmpeg")) {
       planSummary.append(
-        IS_LOCAL
-          ? resolutionLine(RESOLVE.ffmpegLocal, ["ffmpeg"])
-          : resolutionLine(RESOLVE.deployed, ["ffmpeg", "python"]),
+        IS_LOCAL || localRenderer
+          ? resolutionLine(RESOLVE.planFfmpeg, ["ffmpeg"])
+          : resolutionLine(RESOLVE.deployed, ["ffmpeg"]),
       );
     } else {
       planSummary.append(resolutionLine(RESOLVE.planError));
@@ -124,11 +150,28 @@ function renderPlan(plan, planError) {
   }
 }
 
+function renderOutcome(render) {
+  if (!render) return;
+  if (render.executed) {
+    planSummary.append(
+      planLine(
+        `Render: completed on ${IS_LOCAL ? "this machine" : "your machine, via the local renderer"} — saved to ${render.output_path}`,
+        "plan-ok",
+      ),
+    );
+    const url = artifactUrl(render.download);
+    if (url) planSummary.append(linkLine(url, "Open the rendered file"));
+  } else if (render.error) {
+    planSummary.append(planLine(`Render: not run — ${render.error}`, "plan-missing"));
+  }
+}
+
 function renderResult(body) {
   hideError();
   planSummary.replaceChildren();
   specJson.textContent = JSON.stringify(body.scene, null, 2);
   renderPlan(body.plan, body.plan_error);
+  renderOutcome(body.render);
   downloadLink.hidden = false;
   resultPanel.hidden = false;
 }
@@ -187,14 +230,29 @@ function unreachableItem() {
   status.textContent = "Toolchain status unavailable; is the app's server running?";
   item.className = "tool-missing";
   item.append(status);
-  item.append(resolutionLine(RESOLVE.startServer, ["python"]));
+  item.append(resolutionLine(RESOLVE.toolStatus, ["python"]));
   return item;
 }
 
 const LOCAL_FIX = (name) =>
   resolutionLine(name === "blender" ? RESOLVE.blenderLocal : RESOLVE.ffmpegLocal, [name]);
 
-const DEPLOYED_FIX = (name) => resolutionLine(RESOLVE.deployed, [name, "python"]);
+const DEPLOYED_FIX = (name) => resolutionLine(RESOLVE.deployed, [name]);
+
+function showDeployedWithoutRenderer(list) {
+  list.replaceChildren(
+    introItem(
+      `No local renderer detected on this machine (probed 127.0.0.1 ports ${LOCAL_PROBE_PORTS.join(", ")}) — a web page cannot inspect installed programs by itself.`,
+      resolutionLine(RESOLVE.localRenderer, ["python"]),
+    ),
+  );
+  fetch("/api/tools")
+    .then(async (response) => {
+      if (!response.ok) throw new Error(`status ${response.status}`);
+      list.append(...toolRows(await response.json(), DEPLOYED_FIX));
+    })
+    .catch(() => list.append(unreachableItem()));
+}
 
 function refreshToolStatus() {
   const list = document.querySelector("#tool-list");
@@ -207,40 +265,49 @@ function refreshToolStatus() {
       .catch(() => list.replaceChildren(unreachableItem()));
     return;
   }
-  probeLocalRenderer().then((found) => {
-    if (found) {
-      list.replaceChildren(
-        introItem(
-          `Detected the local renderer on 127.0.0.1:${found.port} — reporting this machine's real toolchain:`,
-        ),
-        ...toolRows(found.report, LOCAL_FIX),
-      );
-      return;
-    }
-    list.replaceChildren(
-      introItem(
-        "No local renderer detected on this machine (probed 127.0.0.1 ports 8000, 8080, 8777) — a web page cannot inspect installed programs by itself.",
-        resolutionLine(RESOLVE.localRenderer, ["python"]),
-      ),
-    );
-    fetch("/api/tools")
-      .then(async (response) => {
-        if (!response.ok) throw new Error(`status ${response.status}`);
-        list.append(...toolRows(await response.json(), DEPLOYED_FIX));
-      })
-      .catch(() => list.append(unreachableItem()));
-  });
+  if (CAN_PROBE) {
+    probeLocalRenderer().then((found) => {
+      if (found) {
+        localRenderer = found;
+        list.replaceChildren(
+          introItem(
+            `Detected the local renderer on 127.0.0.1:${found.port} — submitting the form will render on this machine.`,
+          ),
+          ...toolRows(found.report, LOCAL_FIX),
+        );
+        return;
+      }
+      showDeployedWithoutRenderer(list);
+    });
+    return;
+  }
+  showDeployedWithoutRenderer(list);
 }
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   submitButton.disabled = true;
+  const target = IS_LOCAL
+    ? "/api/render"
+    : localRenderer
+      ? `http://127.0.0.1:${localRenderer.port}/api/render`
+      : "/api/spec";
   try {
-    const response = await fetch("/api/spec", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(buildPayload(form)),
-    });
+    let response;
+    try {
+      response = await fetch(target, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildPayload(form)),
+      });
+    } catch (networkError) {
+      if (target === "/api/spec") throw networkError;
+      response = await fetch("/api/spec", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildPayload(form)),
+      });
+    }
     const body = await response.json();
     if (!response.ok) {
       showError(

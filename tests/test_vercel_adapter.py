@@ -342,5 +342,23 @@ class RewriteParamTests(unittest.TestCase):
         self.assertIn("ffmpeg", json.loads(body))
 
 
+class LocalOnlyEndpointTests(ServerlessTestCase):
+    """Rendering and artifact serving exist only in the local runtime."""
+
+    def test_render_post_is_rejected_on_the_serverless_form(self):
+        status, _, body = invoke(
+            self.app, "/api/render", method="POST", body=json.dumps(form_payload())
+        )
+
+        self.assertEqual(status, 403)
+        self.assertIn("local app", json.loads(body)["error"])
+
+    def test_artifact_get_is_rejected_on_the_serverless_form(self):
+        status, _, body = invoke(self.app, "/api/artifact?path=build/preview.mp4")
+
+        self.assertEqual(status, 403)
+        self.assertIn("local app", json.loads(body)["error"])
+
+
 if __name__ == "__main__":
     unittest.main()

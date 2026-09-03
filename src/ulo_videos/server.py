@@ -31,9 +31,12 @@ from urllib.parse import parse_qs, urlsplit
 from . import projects
 from .renderers import (
     AssetPathError,
+    CommandTimeoutError,
     MissingToolError,
+    RendererError,
     Toolchain,
     plan_ffmpeg_render,
+    run_command,
 )
 from .schema import SceneValidationError
 from .templates import compile_scene, serialize_scene
@@ -48,6 +51,16 @@ TOOL_STATUS_CORS_ORIGINS = (
     "https://ulo-videos-nuriys-projects.vercel.app",
 )
 MAX_BODY_BYTES = 1_000_000
+RENDER_TIMEOUT_SECONDS = 300
+# Executable-plan and artifact endpoints exist only in the local runtime: the
+# serverless form compiles and plans, the machine running the local app renders.
+_CORS_PATHS = ("/api/tools", "/api/render")
+_ARTIFACT_TYPES = {
+    ".mp4": "video/mp4",
+    ".mov": "video/quicktime",
+    ".webm": "video/webm",
+    ".png": "image/png",
+}
 _RESOLUTION_PATTERN = re.compile(r"^\s*(\d+)\s*[xX]\s*(\d+)\s*$")
 _STATIC_FILES = {
     "/": ("index.html", "text/html; charset=utf-8"),
@@ -132,10 +145,12 @@ class AppState:
     memory, so a restart (or a fresh function instance) starts empty.
     """
 
-    def __init__(self, *, static_dir, project_root, toolchain):
+    def __init__(self, *, static_dir, project_root, toolchain, allow_exec=False, runner=None):
         self.static_dir = Path(static_dir)
         self.project_root = Path(project_root)
         self.toolchain = toolchain
+        self.allow_exec = allow_exec
+        self.runner = runner if runner is not None else run_command
         self.last_scene_text = None
 
 
@@ -156,6 +171,29 @@ def _json_response(status, payload):
     )
 
 
+def _cors_extra(headers):
+    """CORS echo headers for allowlisted deployed-form origins, else None."""
+    origin = headers.get("Origin", "") if headers is not None else ""
+    if origin in TOOL_STATUS_CORS_ORIGINS:
+        return {"Access-Control-Allow-Origin": origin, "Vary": "Origin"}
+    return None
+
+
+def _preflight_response(path, headers):
+    """Answer a CORS preflight for the probe and render endpoints, else 404."""
+    extra = _cors_extra(headers)
+    if path not in _CORS_PATHS or extra is None:
+        return _json_response(404, {"error": f"not found: {path}"})
+    extra.update(
+        {
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type",
+            "Access-Control-Max-Age": "600",
+        }
+    )
+    return _response(204, b"", "text/plain; charset=utf-8", extra)
+
+
 def _tool_status_response(state, headers):
     """Report toolchain status, CORS-open to the deployed form origins.
 
@@ -163,15 +201,109 @@ def _tool_status_response(state, headers):
     that machine's real tools; a matching Origin is echoed so the browser may
     read the answer, and anything else gets no CORS header.
     """
-    origin = headers.get("Origin", "") if headers is not None else ""
-    extra = None
-    if origin in TOOL_STATUS_CORS_ORIGINS:
-        extra = {"Access-Control-Allow-Origin": origin, "Vary": "Origin"}
     return _response(
         200,
         canonical_json_bytes(state.toolchain.status()),
         "application/json; charset=utf-8",
-        extra,
+        _cors_extra(headers),
+    )
+
+
+def _render_post_response(state, headers, input_stream):
+    """Compile, plan, and — in the local runtime only — execute the plan.
+
+    The response mirrors `POST /api/spec` plus a `render` object: `executed`
+    is true only when the machine running this server actually has the tools
+    and the planned command exited 0. The serverless form answers with
+    `executed: false` never running a subprocess (403 body explains), so
+    rendering stays a local-machine capability by construction.
+    """
+    if not state.allow_exec:
+        return _json_response(
+            403,
+            {"error": "rendering runs only in the local app; the deployed form compiles and plans"},
+        )
+    length = _declared_length(headers)
+    if length is None:
+        return _json_response(400, {"error": "invalid Content-Length header"})
+    if length > MAX_BODY_BYTES:
+        return _json_response(413, {"error": "request body too large"})
+    raw = _read_body(input_stream, length)
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        return _json_response(400, {"error": "request body must be valid JSON"})
+    scene = compile_scene(normalize_form_payload(payload))
+    try:
+        plan = plan_ffmpeg_render(scene, state.project_root, state.toolchain)
+    except AssetPathError as error:
+        return _json_response(422, {"error": str(error)})
+    except MissingToolError as error:
+        return _response(
+            200,
+            canonical_json_bytes(
+                {"scene": scene, "plan": None, "plan_error": str(error), "render": {"executed": False}}
+            ),
+            "application/json; charset=utf-8",
+            _cors_extra(headers),
+        )
+    state.last_scene_text = serialize_scene(scene)
+    render = {"executed": False}
+    if plan["status"] == "ready":
+        output = Path(plan["output"]["path"])
+        output.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            result = state.runner(plan["argv"], timeout=RENDER_TIMEOUT_SECONDS)
+        except (RendererError, CommandTimeoutError) as error:
+            render = {"executed": False, "error": str(error)}
+        else:
+            render = {
+                "executed": result["returncode"] == 0,
+                "returncode": result["returncode"],
+                "stderr_tail": result["stderr"][-2000:],
+                "output_path": str(output),
+                "download": _download_path(output, state.project_root),
+            }
+    return _response(
+        200,
+        canonical_json_bytes({"scene": scene, "plan": plan, "plan_error": None, "render": render}),
+        "application/json; charset=utf-8",
+        _cors_extra(headers),
+    )
+
+
+def _download_path(output, project_root):
+    """Return `output` as a project-root-relative POSIX path for /api/artifact."""
+    try:
+        return output.resolve().relative_to(Path(project_root).resolve()).as_posix()
+    except ValueError:
+        return None
+
+
+def _artifact_response(state, target):
+    """Serve a rendered file from the project's build directory (local only)."""
+    if not state.allow_exec:
+        return _json_response(
+            403,
+            {"error": "rendered files live on the machine running the local app"},
+        )
+    names = parse_qs(urlsplit(target).query).get("path")
+    if not names or len(names) > 1:
+        return _json_response(400, {"error": "path query parameter is required exactly once"})
+    build_root = (state.project_root / "build").resolve()
+    candidate = (state.project_root / names[0]).resolve()
+    if candidate != build_root and build_root not in candidate.parents:
+        return _json_response(404, {"error": "no artifact outside the project build directory"})
+    if not candidate.is_file():
+        return _json_response(404, {"error": f"artifact not found: {names[0]}"})
+    content_type = _ARTIFACT_TYPES.get(candidate.suffix.lower())
+    if content_type is None:
+        return _json_response(415, {"error": f"unsupported artifact type: {candidate.suffix}"})
+    return _response(
+        200,
+        candidate.read_bytes(),
+        content_type,
+        {"Content-Disposition": f'attachment; filename="{candidate.name}"'},
     )
 
 
@@ -289,6 +421,8 @@ def _upload_post_response(state, target, headers, input_stream):
 
 
 def _route(state, method, path, target, headers, input_stream):
+    if method == "OPTIONS":
+        return _preflight_response(path, headers)
     if path in _STATIC_FILES:
         if method == "GET":
             return _static_response(state, path)
@@ -296,6 +430,14 @@ def _route(state, method, path, target, headers, input_stream):
     if path == "/api/tools":
         if method == "GET":
             return _tool_status_response(state, headers)
+        return _method_not_allowed(method, path)
+    if path == "/api/render":
+        if method == "POST":
+            return _render_post_response(state, headers, input_stream)
+        return _method_not_allowed(method, path)
+    if path == "/api/artifact":
+        if method == "GET":
+            return _artifact_response(state, target)
         return _method_not_allowed(method, path)
     if path == "/api/spec/download":
         if method == "GET":
@@ -340,9 +482,13 @@ class UloVideosHTTPServer(ThreadingHTTPServer):
 
     daemon_threads = True
 
-    def __init__(self, address, handler, *, static_dir, project_root, toolchain):
+    def __init__(self, address, handler, *, static_dir, project_root, toolchain, runner=None):
         self.state = AppState(
-            static_dir=static_dir, project_root=project_root, toolchain=toolchain
+            static_dir=static_dir,
+            project_root=project_root,
+            toolchain=toolchain,
+            allow_exec=True,
+            runner=runner,
         )
         super().__init__(address, handler)
 
@@ -355,6 +501,9 @@ class UloVideosHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         self._dispatch("POST")
+
+    def do_OPTIONS(self):
+        self._dispatch("OPTIONS")
 
     def log_message(self, format, *args):
         """Keep request logging quiet; the server runs in a foreground terminal."""
@@ -389,7 +538,7 @@ def _app_state(static_dir, project_root, toolchain):
     )
 
 
-def make_server(host=DEFAULT_HOST, port=DEFAULT_PORT, *, static_dir=None, project_root=None, toolchain=None):
+def make_server(host=DEFAULT_HOST, port=DEFAULT_PORT, *, static_dir=None, project_root=None, toolchain=None, runner=None):
     """Create the local HTTP server bound to (host, port) without serving it."""
     state = _app_state(static_dir, project_root, toolchain)
     return UloVideosHTTPServer(
@@ -398,6 +547,7 @@ def make_server(host=DEFAULT_HOST, port=DEFAULT_PORT, *, static_dir=None, projec
         static_dir=state.static_dir,
         project_root=state.project_root,
         toolchain=state.toolchain,
+        runner=runner,
     )
 
 

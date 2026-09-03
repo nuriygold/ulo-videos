@@ -143,6 +143,12 @@ Endpoints:
 - `GET /api/tools` — core toolchain availability.
 - `POST /api/spec` — compile a scene payload and return it with the planned
   FFmpeg command.
+- `POST /api/render` — local runtime only: compile, plan, and execute the
+  plan with the machine's installed tools (300 s timeout); the response adds
+  a `render` object, and the serverless form answers 403 instead of ever
+  running a subprocess.
+- `GET /api/artifact?path=build/NAME` — local runtime only: serve a rendered
+  file from the project's `build/` directory.
 - `GET /api/spec/download` — the last generated spec as the canonical
   `scene.json`.
 - `POST /api/upload?filename=NAME` — store a media asset under `assets/`;

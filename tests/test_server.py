@@ -333,6 +333,118 @@ class ToolsApiTests(ServerTestCase):
                 self.assertNotIn("Access-Control-Allow-Origin", headers)
 
 
+class PreflightTests(ServerTestCase):
+    def test_preflight_allows_deployed_origins_for_probe_and_render(self):
+        for path in ("/api/tools", "/api/render"):
+            with self.subTest(path=path):
+                status, headers, _ = self.request(
+                    path,
+                    method="OPTIONS",
+                    headers={"Origin": "https://ulo-videos.vercel.app"},
+                )
+
+                self.assertEqual(status, 204)
+                self.assertEqual(
+                    headers.get("Access-Control-Allow-Origin"),
+                    "https://ulo-videos.vercel.app",
+                )
+                self.assertIn("POST", headers.get("Access-Control-Allow-Methods"))
+                self.assertIn("Content-Type", headers.get("Access-Control-Allow-Headers"))
+
+    def test_preflight_rejects_foreign_origins(self):
+        status, headers, _ = self.request(
+            "/api/render", method="OPTIONS", headers={"Origin": "https://example.net"}
+        )
+
+        self.assertEqual(status, 404)
+        self.assertNotIn("Access-Control-Allow-Origin", headers)
+
+
+class RenderApiTests(ServerTestCase):
+    def test_render_executes_a_ready_plan_locally(self):
+        calls = []
+
+        def runner(argv, *, timeout=None, cwd=None):
+            calls.append((list(argv), timeout))
+            return {"argv": list(argv), "returncode": 0, "stdout": "", "stderr": ""}
+
+        self.start_server(runner=runner)
+        status, _, body = self.request(
+            "/api/render", method="POST", body=json.dumps(form_payload())
+        )
+
+        self.assertEqual(status, 200)
+        data = json.loads(body)
+        self.assertTrue(data["render"]["executed"])
+        self.assertEqual(data["render"]["returncode"], 0)
+        self.assertEqual(data["render"]["download"], "build/preview.mp4")
+        self.assertTrue((self.project_root / "build").is_dir())
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(calls[0][0][0].endswith("ffmpeg"))
+        self.assertGreaterEqual(calls[0][1], 1)
+
+    def test_render_without_tools_reports_status_and_never_runs(self):
+        def runner(argv, *, timeout=None, cwd=None):
+            raise AssertionError("runner must not run without a ready plan")
+
+        self.start_server(toolchain=Toolchain(lookup=lambda name: None), runner=runner)
+        status, _, body = self.request(
+            "/api/render", method="POST", body=json.dumps(form_payload())
+        )
+
+        self.assertEqual(status, 200)
+        data = json.loads(body)
+        self.assertIsNone(data["plan"])
+        self.assertIn("ffmpeg", data["plan_error"])
+        self.assertFalse(data["render"]["executed"])
+
+    def test_render_reports_tool_failure_without_raising(self):
+        def runner(argv, *, timeout=None, cwd=None):
+            return {"argv": list(argv), "returncode": 2, "stdout": "", "stderr": "encode boom"}
+
+        self.start_server(runner=runner)
+        status, _, body = self.request(
+            "/api/render", method="POST", body=json.dumps(form_payload())
+        )
+
+        self.assertEqual(status, 200)
+        data = json.loads(body)
+        self.assertFalse(data["render"]["executed"])
+        self.assertEqual(data["render"]["returncode"], 2)
+        self.assertIn("encode boom", data["render"]["stderr_tail"])
+
+    def test_render_validation_error_is_422_json(self):
+        payload = form_payload()
+        del payload["dialogue"]
+
+        status, _, body = self.request(
+            "/api/render", method="POST", body=json.dumps(payload)
+        )
+
+        self.assertEqual(status, 422)
+
+
+class ArtifactApiTests(ServerTestCase):
+    def test_artifact_serves_files_under_the_build_directory(self):
+        build = self.project_root / "build"
+        build.mkdir(exist_ok=True)
+        (build / "preview.mp4").write_bytes(b"MP4DATA")
+
+        status, headers, body = self.request("/api/artifact?path=build/preview.mp4")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(body, b"MP4DATA")
+        self.assertEqual(headers.get("Content-Type"), "video/mp4")
+        self.assertIn("preview.mp4", headers.get("Content-Disposition"))
+
+    def test_artifact_confines_to_the_build_directory(self):
+        for path in ("../assets/house_leak.mp4", "assets/house_leak.mp4", "build/missing.mp4"):
+            with self.subTest(path=path):
+                status, _, _ = self.request(f"/api/artifact?path={path}")
+
+                self.assertEqual(status, 404)
+
+
 class NormalizeFormPayloadTests(unittest.TestCase):
     def test_converts_form_text_fields_to_typed_values(self):
         normalized = normalize_form_payload(form_payload())
