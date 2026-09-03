@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { buildInterruptionScene, createProject, listProjects, listRenderJobs, loadDemoFile, saveShot, submitRender, uploadAsset, type InterruptionDraft } from "../src/web/workspace-client";
+import { buildInterruptionScene, createProject, loadDemoFile, saveShot, submitRender, uploadAsset, type InterruptionDraft } from "../src/web/workspace-client";
 
 const initialDraft: InterruptionDraft = { shotName: "Opening interruption", sourceVideo: "", pauseAt: "7.4", characterAsset: "", position: "foreground_right", entrance: "slide_left", gesture: "shrug_and_point", dialogueText: "Wait — there is a clearer way.", voice: "alloy", lipSync: "rhubarb", captionsEnabled: true, captionStyle: "lower_third", logo: "", width: "1920", height: "1080", fps: "30" };
 type Project = { id: string; name: string; workspaceId: string }; type Shot = { id: string; name: string }; type Job = { id: string; status: string; progress: number; output_url?: string; error_message?: string };
@@ -21,7 +21,7 @@ export default function Home() {
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [setup, setSetup] = useState<{ ready: boolean; services: Record<string, boolean> } | null>(null);
 
-  useEffect(() => { fetch("/api/setup-status").then((response) => response.json()).then(setSetup).catch(() => undefined); listProjects().then((items) => { const first = items[0]; if (first) { setProject(first); setNotice("Workspace restored. Choose or edit the saved shot below."); listRenderJobs(first.id).then(setHistory).catch(() => undefined); } }).catch(() => undefined); }, []);
+  useEffect(() => { fetch("/api/setup-status").then((response) => response.json()).then(setSetup).catch(() => undefined); }, []);
 
   function update<K extends keyof InterruptionDraft>(key: K, value: InterruptionDraft[K]) {
     setDraft((current) => ({ ...current, [key]: value }));
