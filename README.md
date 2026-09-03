@@ -175,9 +175,9 @@ CLI asks. Configuration lives in the repository:
   every route to `ulo_videos.server.make_wsgi_app`, with nothing
   Vercel-specific in the app itself.
 - `vercel.json` — the catch-all rewrite (`/(.*)` → `/api`) that serves the
-  form at `/` through the function, plus `excludeFiles` so the bundle carries
-  the function, `src/`, and `templates/` only; media assets, tests, and docs
-  stay out of the deployment.
+  form at `/` through the function, plus `excludeFiles` that keeps tests,
+  docs, examples, scripts, media assets, and build output out of the function
+  bundle; anything else in the repository rides along inert.
 - `.python-version` — pins the runtime to Python 3.14, matching local
   development. The function stays standard-library only; `requirements.txt`
   documents zero Python dependencies.
@@ -205,9 +205,12 @@ What requires the local machine:
   request bodies are capped at a few MiB by the platform, so large uploads
   never reach the app there.
 
-Everything else — path safety, validation, canonical JSON, and the
-400/404/405/413/422 error semantics — is shared behavior, because both the
-local handler and the deployed function call the same dispatcher.
+Everything else — validation, canonical JSON, and the 400/404/405/413/422
+error semantics — is shared behavior, because both the local handler and the
+deployed function call the same dispatcher. One ordering nuance: asset paths
+resolve after the ffmpeg requirement is checked, so on a host without ffmpeg
+a malformed asset path surfaces as a named `plan_error` rather than a
+validation error.
 
 ## Run the tests
 

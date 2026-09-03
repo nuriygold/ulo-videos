@@ -2,7 +2,7 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "functions": {
     "api/**/*.py": {
-      "excludeFiles": "{tests/**,docs/**,examples/**,scripts/**,assets/**,build/**}"
+      "excludeFiles": "{tests/**,docs/**,examples/**,scripts/**,assets/**,build/**,HANDOFF.md}"
     }
   },
   "rewrites": [{ "source": "/(.*)", "destination": "/api" }]
