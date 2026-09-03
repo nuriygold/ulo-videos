@@ -148,6 +148,12 @@ button:disabled { opacity: 0.6; cursor: wait; }
   font-weight: 400;
 }
 .tool-list .resolution { font-size: 0.8rem; }
+.download-link {
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
 
 .plan-summary {
   display: grid;

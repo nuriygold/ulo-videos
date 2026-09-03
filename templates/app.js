@@ -28,6 +28,12 @@ const RESOLVE = {
     "Resolve: start the app's server (PYTHONPATH=src python3 -m ulo_videos), then try again.",
 };
 
+const DOWNLOADS = {
+  ffmpeg: { url: "https://ffmpeg.org/download.html", label: "Download FFmpeg" },
+  blender: { url: "https://www.blender.org/download/", label: "Download Blender" },
+  python: { url: "https://www.python.org/downloads/", label: "Download Python" },
+};
+
 function buildPayload(formElement) {
   const payload = {};
   for (const field of formElement.elements) {
@@ -44,18 +50,30 @@ function buildPayload(formElement) {
   return payload;
 }
 
-function resolutionLine(text) {
+function resolutionLine(text, links) {
   const line = document.createElement("p");
   line.className = "resolution";
   line.textContent = text;
+  for (const key of links || []) {
+    const info = DOWNLOADS[key];
+    if (!info) continue;
+    line.append(" ");
+    const anchor = document.createElement("a");
+    anchor.className = "download-link";
+    anchor.href = info.url;
+    anchor.target = "_blank";
+    anchor.rel = "noopener noreferrer";
+    anchor.textContent = info.label;
+    line.append(anchor);
+  }
   return line;
 }
 
-function showError(message, resolution) {
+function showError(message, resolution, links) {
   const messageLine = document.createElement("p");
   messageLine.textContent = message;
   errorPanel.replaceChildren(messageLine);
-  if (resolution) errorPanel.append(resolutionLine(resolution));
+  if (resolution) errorPanel.append(resolutionLine(resolution, links));
   errorPanel.hidden = false;
 }
 
@@ -75,7 +93,11 @@ function renderPlan(plan, planError) {
   if (!plan) {
     planSummary.append(planLine(`Plan unavailable: ${planError || "unknown error"}`, "plan-missing"));
     if (planError && planError.includes("ffmpeg")) {
-      planSummary.append(resolutionLine(IS_LOCAL ? RESOLVE.ffmpegLocal : RESOLVE.deployed));
+      planSummary.append(
+        IS_LOCAL
+          ? resolutionLine(RESOLVE.ffmpegLocal, ["ffmpeg"])
+          : resolutionLine(RESOLVE.deployed, ["ffmpeg", "python"]),
+      );
     } else {
       planSummary.append(resolutionLine(RESOLVE.planError));
     }
@@ -93,7 +115,7 @@ function renderPlan(plan, planError) {
   if (plan.captions.reason) {
     planSummary.append(planLine(`Captions: ${plan.captions.applied ? "burned in" : "not applied"} - ${plan.captions.reason}`));
     if (!plan.captions.applied && plan.captions.reason.includes("drawtext")) {
-      planSummary.append(resolutionLine(RESOLVE.drawtext));
+      planSummary.append(resolutionLine(RESOLVE.drawtext, ["ffmpeg"]));
     }
   }
 }
@@ -125,7 +147,7 @@ function refreshToolStatus() {
           const fix = IS_LOCAL
             ? (name === "blender" ? RESOLVE.blenderLocal : RESOLVE.ffmpegLocal)
             : RESOLVE.deployed;
-          item.append(resolutionLine(fix));
+          item.append(resolutionLine(fix, IS_LOCAL ? [name] : [name, "python"]));
         }
         return item;
       });
@@ -137,7 +159,7 @@ function refreshToolStatus() {
       status.textContent = "Toolchain status unavailable; is the app's server running?";
       item.className = "tool-missing";
       item.append(status);
-      item.append(resolutionLine(RESOLVE.startServer));
+      item.append(resolutionLine(RESOLVE.startServer, ["python"]));
       list.replaceChildren(item);
     });
 }
@@ -164,6 +186,7 @@ form.addEventListener("submit", async (event) => {
     showError(
       "Could not reach the app's server; is it still running?",
       RESOLVE.startServer,
+      ["python"],
     );
   } finally {
     submitButton.disabled = false;
