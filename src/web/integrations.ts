@@ -3,6 +3,8 @@
 export type AssetRole = "source_video" | "character" | "logo" | "audio" | "font" | "render_output";
 
 export type AssetRecord = { id: string; workspaceId: string; projectId?: string; blobKey: string; blobUrl: string; role: AssetRole; mimeType: string; bytes: number; sha256?: string };
+export type ProjectRecord = { id: string; workspaceId: string; name: string; createdAt: string };
+export type ShotRecord = { id: string; projectId: string; name: string; template: string; templateVersion: number; spec: Record<string, unknown>; createdAt: string; updatedAt: string };
 
 export interface BlobStore {
   createUploadUrl(input: { key: string; contentType: string; maxBytes: number }): Promise<{ uploadUrl: string; blobKey: string }>;
@@ -12,11 +14,14 @@ export interface BlobStore {
 
 export interface ControlPlaneStore {
   createWorkspace(id: string): Promise<void>;
-  createProject(input: { id: string; workspaceId: string; name: string }): Promise<void>;
+  createProject(input: { id: string; workspaceId: string; name: string }): Promise<ProjectRecord>;
+  listProjects(workspaceId: string): Promise<ProjectRecord[]>;
   projectBelongsToWorkspace(projectId: string, workspaceId: string): Promise<boolean>;
   /** Insert an immutable asset claim; duplicate IDs must be rejected. */
   saveAsset(input: AssetRecord): Promise<void>;
-  saveShot(input: { id: string; projectId: string; name: string; template: string; templateVersion: number; spec: Record<string, unknown> }): Promise<void>;
+  saveShot(input: Omit<ShotRecord, "createdAt" | "updatedAt"> & { workspaceId: string }): Promise<ShotRecord>;
+  listShots(projectId: string, workspaceId: string): Promise<ShotRecord[]>;
+  getShot(shotId: string, projectId: string, workspaceId: string): Promise<ShotRecord | null>;
   createRenderJob(input: { id: string; workspaceId: string; projectId: string; shotId: string; template: string; templateVersion: number; specSnapshot: Record<string, unknown> }): Promise<void>;
   getRenderJob(id: string, workspaceId: string): Promise<Record<string, unknown> | null>;
   updateRenderJob(id: string, update: Record<string, unknown>): Promise<void>;
