@@ -17,10 +17,7 @@ const FALLBACK_CAPABILITIES: RendererCapabilities = { freezeResume: true, logo: 
 const EXTERNAL_CHARACTER_FORMATS = [".blend", ".gltf", ".glb", ".fbx"];
 
 function externalCapabilities(reportedFormats: string[] | undefined): RendererCapabilities {
-  const characterFormats = [
-    ".blend",
-    ...EXTERNAL_CHARACTER_FORMATS.slice(1).filter((format) => reportedFormats?.includes(format)),
-  ];
+  const characterFormats = EXTERNAL_CHARACTER_FORMATS.filter((format) => reportedFormats?.includes(format));
   return { freezeResume: true, logo: true, captions: true, character: true, sourceAudio: false, speech: false, lipSync: false, characterFormats };
 }
 

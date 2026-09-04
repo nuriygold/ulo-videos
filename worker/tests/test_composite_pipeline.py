@@ -4,6 +4,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+import subprocess as subprocess_module
 from pathlib import Path
 
 
@@ -139,6 +140,30 @@ class CompositePipelineTests(unittest.TestCase):
                 character.write_text(json.dumps({"buffers": [{"uri": "mesh.bin"}]}))
                 with self.assertRaisesRegex(RuntimeError, "external resources"):
                     module.reject_external_gltf_resources(character, ".gltf")
+        finally:
+            if previous_bpy is None:
+                del sys.modules["bpy"]
+            else:
+                sys.modules["bpy"] = previous_bpy
+
+    def test_imported_character_selects_single_camera(self):
+        import importlib.util
+        import sys
+        import types
+
+        fake_bpy = types.ModuleType("bpy")
+        previous_bpy = sys.modules.get("bpy")
+        sys.modules["bpy"] = fake_bpy
+        try:
+            path = Path(__file__).parents[1] / "blender_character.py"
+            spec = importlib.util.spec_from_file_location("blender_character_test", path)
+            module = importlib.util.module_from_spec(spec)
+            assert spec.loader is not None
+            spec.loader.exec_module(module)
+            camera = types.SimpleNamespace(type="CAMERA")
+            fake_bpy.context = types.SimpleNamespace(scene=types.SimpleNamespace(camera=None, objects=[camera]))
+            module.select_imported_camera()
+            self.assertIs(fake_bpy.context.scene.camera, camera)
         finally:
             if previous_bpy is None:
                 del sys.modules["bpy"]
@@ -312,6 +337,81 @@ class CompositePipelineTests(unittest.TestCase):
         self.assertIn("foreground_right", script)
         self.assertIn("def fade_materials", script)
         self.assertIn("keyframe_insert(data_path=\"default_value\"", script)
+
+    def test_blender_render_engine_prefers_available_eevee_variants(self):
+        import importlib.util
+        import sys
+        import types
+
+        fake_bpy = types.ModuleType("bpy")
+        previous_bpy = sys.modules.get("bpy")
+        sys.modules["bpy"] = fake_bpy
+        try:
+            path = Path(__file__).parents[1] / "blender_character.py"
+            spec = importlib.util.spec_from_file_location("blender_character_test", path)
+            module = importlib.util.module_from_spec(spec)
+            assert spec.loader is not None
+            spec.loader.exec_module(module)
+            scene = types.SimpleNamespace(render=types.SimpleNamespace(
+                engine=None,
+                bl_rna=types.SimpleNamespace(properties={
+                    "engine": types.SimpleNamespace(enum_items=[types.SimpleNamespace(identifier="BLENDER_EEVEE")]),
+                }),
+            ))
+            self.assertEqual(module.set_render_engine(scene), "BLENDER_EEVEE")
+            self.assertEqual(scene.render.engine, "BLENDER_EEVEE")
+        finally:
+            if previous_bpy is None:
+                del sys.modules["bpy"]
+            else:
+                sys.modules["bpy"] = previous_bpy
+
+    def test_integration_fixture_rejects_non_blender_50_demo_asset(self):
+        import importlib.util
+
+        path = Path(__file__).parents[1] / "integration_fixtures.py"
+        spec = importlib.util.spec_from_file_location("integration_fixtures_test", path)
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory() as temporary:
+            asset = Path(temporary) / "demo-character.blend"
+            asset.write_bytes(b"BLENDER17-01v0520REND")
+            with self.assertRaisesRegex(SystemExit, "Blender 5.0"):
+                module.require_blender_50_asset(asset)
+
+    def test_integration_fixture_run_prints_failing_command_output(self):
+        import importlib.util
+        from unittest.mock import patch
+
+        path = Path(__file__).parents[1] / "integration_fixtures.py"
+        spec = importlib.util.spec_from_file_location("integration_fixtures_test", path)
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+        result = subprocess_module.CompletedProcess(["tool"], 1, "out", "err")
+        with patch("subprocess.run", return_value=result):
+            with self.assertRaises(subprocess_module.CalledProcessError):
+                module.run(["tool"])
+
+    def test_integration_fixture_embeds_gltf_sidecars(self):
+        import importlib.util
+        import json
+
+        path = Path(__file__).parents[1] / "integration_fixtures.py"
+        spec = importlib.util.spec_from_file_location("integration_fixtures_test", path)
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            gltf = root / "valid.gltf"
+            sidecar = root / "valid.bin"
+            sidecar.write_bytes(b"mesh")
+            gltf.write_text(json.dumps({"buffers": [{"uri": "valid.bin", "byteLength": 4}]}), encoding="utf-8")
+            module.embed_gltf_resources(gltf)
+            self.assertFalse(sidecar.exists())
+            self.assertIn("data:application/octet-stream;base64,", gltf.read_text(encoding="utf-8"))
 
     @unittest.skipUnless(os.environ.get("ULO_RUN_FFMPEG_INTEGRATION") == "1" and shutil.which("ffmpeg"), "requires ULO_RUN_FFMPEG_INTEGRATION=1 and FFmpeg")
     def test_actual_ffmpeg_assembly_adds_only_the_two_second_freeze(self):

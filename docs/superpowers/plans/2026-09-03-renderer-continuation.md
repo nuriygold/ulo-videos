@@ -49,7 +49,7 @@ Add an amd64 GitHub Actions worker job that:
 
 - Builds the pinned Blender 5.2.1 image.
 - Executes FFmpeg, Blender, and `rsvg-convert` health checks.
-- Opens and renders the Blender 5.0.2 demo asset.
+- Opens and renders the Blender 5.0.2 demo asset. External blocker note: as of 2026-09-04, the official Blender 5.0 archive at `https://download.blender.org/release/Blender5.0/` lists 5.0.0 and 5.0.1 artifacts only, with no 5.0.2 artifact available; until an official 5.0.2 binary or 5.0.2-authored asset is provided, verify the latest available Blender 5.0.x demo asset by its stable `v0500` file-format header and by opening/rendering it in the pinned Blender 5.2.1 worker image.
 - Runs a real FFmpeg composition and samples frames before, during, and after interruption to prove freeze/resume, logo visibility, caption timing, and termination.
 - Generates small Blender fixtures and proves `.blend`, self-contained `.gltf`, `.glb`, and `.fbx` success plus missing-camera, missing-armature, missing-gesture, ambiguous-gesture, and missing-sidecar failures.
 

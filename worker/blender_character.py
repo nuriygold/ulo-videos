@@ -88,6 +88,14 @@ def import_character(args):
     else:
         bpy.ops.import_scene.fbx(filepath=args.character)
         reject_external_fbx_textures()
+    select_imported_camera()
+
+
+def select_imported_camera():
+    if bpy.context.scene.camera is None:
+        cameras = [item for item in bpy.context.scene.objects if item.type == "CAMERA"]
+        if len(cameras) == 1:
+            bpy.context.scene.camera = cameras[0]
 
 
 def character_position_offset(position):
@@ -130,6 +138,15 @@ def fade_materials(armature, start_frame, end_frame):
         raise RuntimeError("character asset has no alpha-capable material for fade_in")
 
 
+def set_render_engine(scene):
+    engines = {item.identifier for item in scene.render.bl_rna.properties["engine"].enum_items}
+    for engine in ("BLENDER_EEVEE_NEXT", "BLENDER_EEVEE"):
+        if engine in engines:
+            scene.render.engine = engine
+            return engine
+    raise RuntimeError(f"Blender render engine must support EEVEE; available engines: {', '.join(sorted(engines))}")
+
+
 def main():
     args = arguments()
     imported = args.character is not None
@@ -154,7 +171,7 @@ def main():
         bpy.ops.wm.save_as_mainfile(filepath=args.imported_blend)
 
     scene = bpy.context.scene
-    scene.render.engine = "BLENDER_EEVEE_NEXT"
+    set_render_engine(scene)
     scene.render.resolution_x = args.width
     scene.render.resolution_y = args.height
     scene.render.resolution_percentage = 100

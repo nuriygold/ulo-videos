@@ -40,9 +40,9 @@ test("renderer status does not advertise imported formats that the worker did no
   assert.deepEqual(setupStatus({ RENDER_QUEUE_URL: "queue" }, health).renderer.capabilities.characterFormats, [".blend"]);
 });
 
-test("renderer status retains native Blender support while adding reported imported formats", async () => {
+test("renderer status advertises only worker-reported character formats", async () => {
   const health = await rendererHealthForQueue("https://dispatcher.example/render-jobs", async () => Response.json({ ok: true, mode: "external_worker", capabilities: { characterFormats: [".gltf"] } }), { healthUrl: "https://renderer.example/healthz" });
-  assert.deepEqual(setupStatus({ RENDER_QUEUE_URL: "queue" }, health).renderer.capabilities.characterFormats, [".blend", ".gltf"]);
+  assert.deepEqual(setupStatus({ RENDER_QUEUE_URL: "queue" }, health).renderer.capabilities.characterFormats, [".gltf"]);
 });
 
 test("renderer health does not GET a POST-only queue URL", async () => {
