@@ -158,6 +158,6 @@ def build_composite_plan(scene: dict, workdir: Union[str, Path]) -> CompositePla
     ffmpeg_argv = [
         "ffmpeg", "-y", "-i", str(source), "-loop", "1", "-i", str(logo_image),
         "-framerate", str(fps), "-start_number", "1", "-i", str(character_frames),
-        "-filter_complex", filters, "-map", "[out]", "-an", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-shortest", str(output_path),
+        "-filter_complex", filters, "-map", "[out]", "-an", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(output_path),
     ]
     return CompositePlan(source_url, character_url, character_format, logo_url, source, character_file, imported_blend, logo_source, logo_image, rasterize_logo, character_frames, blender_argv, ffmpeg_argv, str(output_path))

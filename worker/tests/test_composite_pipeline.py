@@ -49,7 +49,7 @@ class CompositePipelineTests(unittest.TestCase):
         self.assertIn("drawtext=text='A clearer way.'", filters)
         self.assertIn("enable='between(t,7.4,9.4)'", filters)
         self.assertIn("shortest=1", filters)
-        self.assertIn("-shortest", plan.ffmpeg_argv)
+        self.assertNotIn("-shortest", plan.ffmpeg_argv)
         self.assertTrue(plan.output.endswith("/tmp/render-job/output.mp4"))
 
     def test_gltf_character_uses_the_blender_import_path_and_keeps_the_uploaded_filename(self):
