@@ -18,14 +18,27 @@ export type AssetUploadPolicy = {
   maximumSizeInBytes: number;
 };
 
+const CHARACTER_MAXIMUM_SIZE_IN_BYTES = 2 * GIB;
+const CHARACTER_FORMATS = [".blend", ".gltf", ".glb", ".fbx"] as const;
+export type CharacterUploadFormat = typeof CHARACTER_FORMATS[number];
+
+export const CHARACTER_CONTENT_TYPES: Record<CharacterUploadFormat, readonly string[]> = {
+  ".blend": ["application/x-blender"],
+  ".gltf": ["model/gltf+json"],
+  ".glb": ["model/gltf-binary"],
+  ".fbx": ["application/octet-stream"],
+};
+
+export const CHARACTER_EXTENSIONS: readonly CharacterUploadFormat[] = CHARACTER_FORMATS;
+
 const UPLOAD_POLICIES: Record<BrowserUploadRole, AssetUploadPolicy> = {
   source_video: {
     allowedContentTypes: ["video/mp4", "video/quicktime", "video/webm"],
     maximumSizeInBytes: 5 * GIB,
   },
   character: {
-    allowedContentTypes: ["application/x-blender"],
-    maximumSizeInBytes: 2 * GIB,
+    allowedContentTypes: Object.values(CHARACTER_CONTENT_TYPES).flat(),
+    maximumSizeInBytes: CHARACTER_MAXIMUM_SIZE_IN_BYTES,
   },
   logo: {
     allowedContentTypes: ["image/png", "image/jpeg", "image/webp", "image/svg+xml"],
@@ -70,9 +83,50 @@ function safeFilename(value: unknown): string {
 }
 
 function validateFilenameForRole(role: BrowserUploadRole, filename: string): void {
-  if (role === "character" && !filename.toLowerCase().endsWith(".blend")) {
-    throw new Error("character assets must use a .blend filename");
+  if (role === "character" && !CHARACTER_EXTENSIONS.some((extension) => filename.toLowerCase().endsWith(extension))) {
+    throw new Error("character assets must use a .blend, .gltf, .glb, or .fbx filename");
   }
+}
+
+function characterExtension(filename: string): keyof typeof CHARACTER_CONTENT_TYPES {
+  const extension = CHARACTER_EXTENSIONS.find((item) => filename.toLowerCase().endsWith(item));
+  if (!extension) throw new Error("character assets must use a .blend, .gltf, .glb, or .fbx filename");
+  return extension;
+}
+
+export function characterMimeTypeForFilename(filename: string, contentType: string): string {
+  const allowed = CHARACTER_CONTENT_TYPES[characterExtension(filename)];
+  const normalized = contentType.toLowerCase().split(";", 1)[0].trim();
+  if (!normalized) return allowed[0];
+  if (!allowed.includes(normalized as never)) {
+    throw new Error(`character ${characterExtension(filename)} uploads must use ${allowed.join(" or ")}`);
+  }
+  return normalized;
+}
+
+export function characterUploadPolicyForFormats(formats: readonly string[]): AssetUploadPolicy {
+  const supported = CHARACTER_EXTENSIONS.filter((format) => formats.includes(format));
+  return {
+    allowedContentTypes: supported.flatMap((format) => [...CHARACTER_CONTENT_TYPES[format]]),
+    maximumSizeInBytes: CHARACTER_MAXIMUM_SIZE_IN_BYTES,
+  };
+}
+
+export function characterUploadAcceptForFormats(formats: readonly string[]): string {
+  const supported = CHARACTER_EXTENSIONS.filter((format) => formats.includes(format));
+  return supported.flatMap((format) => [format, ...CHARACTER_CONTENT_TYPES[format]]).join(",");
+}
+
+export function isCharacterUploadFormatSupported(filename: string, formats: readonly string[]): boolean {
+  const extension = CHARACTER_EXTENSIONS.find((item) => filename.toLowerCase().endsWith(item));
+  return Boolean(extension && formats.includes(extension));
+}
+
+export function characterFormatsLabel(formats: readonly string[]): string {
+  const supported = CHARACTER_EXTENSIONS.filter((format) => formats.includes(format));
+  if (supported.length === 0) return "no character formats";
+  if (supported.length === 1) return supported[0];
+  return `${supported.slice(0, -1).join(", ")}, or ${supported.at(-1)}`;
 }
 
 export function uploadPolicyForRole(role: AssetRole): AssetUploadPolicy {
@@ -166,6 +220,7 @@ export function assetRecordFromUpload(input: {
   if (!policy.allowedContentTypes.includes(contentType)) {
     throw new Error(`completed upload content type is not allowed for ${input.intent.role}`);
   }
+  if (input.intent.role === "character") characterMimeTypeForFilename(input.intent.filename, contentType);
   if (!Number.isSafeInteger(input.bytes) || input.bytes <= 0 || input.bytes > policy.maximumSizeInBytes) {
     throw new Error("completed upload size is outside the allowed range");
   }

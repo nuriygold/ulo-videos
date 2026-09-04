@@ -1,7 +1,10 @@
-FROM python:3.12-slim
+FROM --platform=linux/amd64 python:3.12-slim
 
+ARG TARGETARCH
 ARG BLENDER_VERSION=5.2.1
 ARG BLENDER_SHA256=a31f524fa99a527d3d52b7f5aaa68c34e1a19d5a1c9473f79c5cc610fd5b10e9
+
+RUN test "${TARGETARCH}" = "amd64" || (echo "ulo-videos render worker requires linux/amd64" >&2; exit 1)
 
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \

@@ -6,8 +6,14 @@ never be silently ignored.
 """
 
 import argparse
+import json
 import os
+import shutil
+import re
+import struct
 import sys
+import unicodedata
+from pathlib import Path
 
 import bpy
 
@@ -22,11 +28,74 @@ def arguments():
     parser.add_argument("--position", required=True)
     parser.add_argument("--entrance", required=True)
     parser.add_argument("--gesture", required=True)
+    parser.add_argument("--character")
+    parser.add_argument("--character-format", choices=(".gltf", ".glb", ".fbx"))
+    parser.add_argument("--imported-blend")
     return parser.parse_args(sys.argv[sys.argv.index("--") + 1:])
 
 
 def normalized(value):
-    return "".join(character for character in value.lower() if character.isalnum())
+    return re.sub(r"[\W_]+", "_", unicodedata.normalize("NFKC", value).lower()).strip("_")
+
+
+def _gltf_document(path, character_format):
+    try:
+        if character_format == ".gltf":
+            return json.loads(Path(path).read_text(encoding="utf-8"))
+        data = Path(path).read_bytes()
+        if len(data) < 20 or data[:4] != b"glTF":
+            raise ValueError("missing GLB header")
+        _, version, length = struct.unpack("<4sII", data[:12])
+        if version != 2 or length != len(data):
+            raise ValueError("invalid GLB version or length")
+        chunk_length, chunk_type = struct.unpack("<I4s", data[12:20])
+        if chunk_type != b"JSON" or 20 + chunk_length > len(data):
+            raise ValueError("missing GLB JSON chunk")
+        return json.loads(data[20:20 + chunk_length].decode("utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError, struct.error) as error:
+        raise RuntimeError(f"could not inspect {character_format} character resources: {error}") from error
+
+
+def reject_external_gltf_resources(path, character_format):
+    document = _gltf_document(path, character_format)
+    external = []
+    for key in ("buffers", "images"):
+        for resource in document.get(key, []):
+            uri = resource.get("uri") if isinstance(resource, dict) else None
+            if isinstance(uri, str) and not uri.startswith("data:"):
+                external.append(uri)
+    if external:
+        raise RuntimeError(
+            f"{character_format} character references external resources ({', '.join(external[:3])}); upload a self-contained GLB or embedded-resource glTF"
+        )
+
+
+def reject_external_fbx_textures():
+    external = [image.filepath for image in bpy.data.images if image.source == "FILE" and image.packed_file is None]
+    if external:
+        raise RuntimeError(
+            f"FBX character references external textures ({', '.join(external[:3])}); embed the resources before upload"
+        )
+
+
+def import_character(args):
+    if not (args.character and args.character_format and args.imported_blend):
+        raise RuntimeError("character import requires a file, format, and temporary .blend path")
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    if args.character_format in {".gltf", ".glb"}:
+        reject_external_gltf_resources(args.character, args.character_format)
+        bpy.ops.import_scene.gltf(filepath=args.character)
+    else:
+        bpy.ops.import_scene.fbx(filepath=args.character)
+        reject_external_fbx_textures()
+    select_imported_camera()
+
+
+def select_imported_camera():
+    if bpy.context.scene.camera is None:
+        cameras = [item for item in bpy.context.scene.objects if item.type == "CAMERA"]
+        if len(cameras) == 1:
+            bpy.context.scene.camera = cameras[0]
 
 
 def character_position_offset(position):
@@ -69,21 +138,40 @@ def fade_materials(armature, start_frame, end_frame):
         raise RuntimeError("character asset has no alpha-capable material for fade_in")
 
 
+def set_render_engine(scene):
+    engines = {item.identifier for item in scene.render.bl_rna.properties["engine"].enum_items}
+    for engine in ("BLENDER_EEVEE_NEXT", "BLENDER_EEVEE"):
+        if engine in engines:
+            scene.render.engine = engine
+            return engine
+    raise RuntimeError(f"Blender render engine must support EEVEE; available engines: {', '.join(sorted(engines))}")
+
+
 def main():
     args = arguments()
-    armature = next((item for item in bpy.context.scene.objects if item.type == "ARMATURE"), None)
-    if armature is None:
+    imported = args.character is not None
+    if imported:
+        import_character(args)
+    armatures = [item for item in bpy.context.scene.objects if item.type == "ARMATURE"]
+    if not armatures:
         raise RuntimeError("character asset must contain an armature")
     if bpy.context.scene.camera is None:
         raise RuntimeError("character asset must define an active camera")
-    action = next((item for item in bpy.data.actions if normalized(item.name) == normalized(args.gesture)), None)
-    if action is None:
+    gesture = normalized(args.gesture)
+    actions = [item for item in bpy.data.actions if normalized(item.name) == gesture]
+    if not actions:
         raise RuntimeError(f"character asset does not contain the requested gesture action: {args.gesture}")
+    if len(actions) > 1:
+        raise RuntimeError(f"requested gesture action matches multiple actions: {args.gesture}")
+    armature = armatures[0]
+    action = actions[0]
     armature.animation_data_create()
     armature.animation_data.action = action
+    if imported:
+        bpy.ops.wm.save_as_mainfile(filepath=args.imported_blend)
 
     scene = bpy.context.scene
-    scene.render.engine = "BLENDER_EEVEE_NEXT"
+    set_render_engine(scene)
     scene.render.resolution_x = args.width
     scene.render.resolution_y = args.height
     scene.render.resolution_percentage = 100
@@ -92,6 +180,8 @@ def main():
     scene.render.image_settings.file_format = "PNG"
     scene.frame_start = 1
     scene.frame_end = args.frames
+    if os.path.isdir(args.output_dir):
+        shutil.rmtree(args.output_dir)
     os.makedirs(args.output_dir, exist_ok=True)
     scene.render.filepath = os.path.join(args.output_dir, "character_")
 

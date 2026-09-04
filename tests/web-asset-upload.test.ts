@@ -47,23 +47,55 @@ test("upload policies restrict MIME types and provide finite size limits", () =>
   assert.throws(() => uploadPolicyForRole("constructor" as never), /not allowed/i);
 });
 
-test("character uploads require a Blender filename and Blender MIME type", () => {
+test("character browser upload helpers derive accept policy from active renderer formats", async () => {
+  const {
+    characterUploadAcceptForFormats,
+    characterUploadPolicyForFormats,
+    isCharacterUploadFormatSupported,
+  } = await import("../src/web/asset-upload");
+
+  assert.equal(characterUploadAcceptForFormats([]), "");
+  assert.deepEqual(characterUploadPolicyForFormats([]).allowedContentTypes, []);
+  assert.equal(isCharacterUploadFormatSupported("hero.glb", []), false);
+  assert.equal(characterUploadAcceptForFormats([".blend", ".glb"]), ".blend,application/x-blender,.glb,model/gltf-binary");
+  assert.deepEqual(characterUploadPolicyForFormats([".blend", ".glb"]).allowedContentTypes, ["application/x-blender", "model/gltf-binary"]);
+  assert.equal(isCharacterUploadFormatSupported("Hero.GLB", [".blend", ".glb"]), true);
+  assert.equal(isCharacterUploadFormatSupported("Hero.fbx", [".blend", ".glb"]), false);
+});
+
+test("character uploads accept only format-matched Blender, glTF, GLB, and FBX MIME types", () => {
   const characterIntent = { ...intent, role: "character" as const, filename: "Lizard.BLEND" };
   const key = buildAssetBlobKey(characterIntent);
 
-  assert.deepEqual(uploadPolicyForRole("character").allowedContentTypes, ["application/x-blender"]);
+  assert.deepEqual(uploadPolicyForRole("character").allowedContentTypes, [
+    "application/x-blender", "model/gltf+json", "model/gltf-binary", "application/octet-stream",
+  ]);
   assert.deepEqual(parseAssetUploadIntent(JSON.stringify(characterIntent)), characterIntent);
+  for (const format of [
+    { filename: "hero.gltf", contentType: "model/gltf+json" },
+    { filename: "hero.glb", contentType: "model/gltf-binary" },
+    { filename: "hero.fbx", contentType: "application/octet-stream" },
+  ]) {
+    const formatIntent = { ...characterIntent, filename: format.filename };
+    const formatKey = buildAssetBlobKey(formatIntent);
+    assert.deepEqual(parseAssetUploadIntent(JSON.stringify(formatIntent)), formatIntent);
+    assert.equal(assetRecordFromUpload({
+      intent: formatIntent,
+      blob: { pathname: formatKey, url: `https://blob.example/${formatKey}`, contentType: format.contentType },
+      bytes: 42,
+    }).mimeType, format.contentType);
+  }
   assert.throws(
     () => parseAssetUploadIntent(JSON.stringify({ ...characterIntent, filename: "lizard.obj" })),
-    /\.blend/i,
+    /\.blend.*\.gltf.*\.glb.*\.fbx/i,
   );
   assert.throws(
     () => assetRecordFromUpload({
-      intent: characterIntent,
-      blob: { pathname: key, url: `https://blob.example/${key}`, contentType: "application/octet-stream" },
+      intent: { ...characterIntent, filename: "hero.glb" },
+      blob: { pathname: buildAssetBlobKey({ ...characterIntent, filename: "hero.glb" }), url: "https://blob.example/hero.glb", contentType: "model/gltf+json" },
       bytes: 42,
     }),
-    /content type/i,
+    /character .* uploads/i,
   );
 });
 

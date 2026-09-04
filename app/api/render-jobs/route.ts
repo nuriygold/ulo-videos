@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { randomUUID } from "node:crypto";
 import { submitRenderJob } from "../../../src/web/job-service";
+import { queueRejectionMessage } from "../../../src/web/render-queue";
+import { rendererHealthForQueue, setupStatus } from "../../../src/web/setup-status";
 import { getSupabaseStore } from "../../../src/web/supabase-store";
 import { newWorkspaceId, WORKSPACE_COOKIE } from "../../../src/web/anonymous-workspace";
 
@@ -26,7 +28,8 @@ export async function POST(request: Request) {
     await store.createWorkspace(workspaceId);
     const shot = await store.getShot(body.shotId, body.projectId, workspaceId);
     if (!shot) return NextResponse.json({ error: "shot not found in this workspace" }, { status: 404 });
-    const job = await submitRenderJob({ id: `rj_${randomUUID()}`, workspaceId, projectId: body.projectId, shotId: body.shotId, template: shot.template, templateVersion: shot.templateVersion, specSnapshot: shot.spec }, { create: (value) => store.createRenderJob(value), get: (id) => store.getRenderJob(id, workspaceId) as any, update: (id, update) => store.updateRenderJob(id, { status: update.status, progress: update.progress, error_code: update.errorCode, error_message: update.errorMessage, completed_at: new Date().toISOString() }) }, { publish: async (message) => { const queueUrl = process.env.RENDER_QUEUE_URL; if (!queueUrl) throw new Error("render queue is not configured"); const response = await fetch(queueUrl, { method: "POST", headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.RENDER_WORKER_SECRET || ""}` }, body: JSON.stringify(message) }); if (!response.ok) throw new Error(`render queue rejected the job (${response.status})`); } });
+    const status = setupStatus(process.env, await rendererHealthForQueue(process.env.RENDER_QUEUE_URL, fetch, { healthUrl: process.env.RENDER_WORKER_HEALTH_URL }));
+    const job = await submitRenderJob({ id: `rj_${randomUUID()}`, workspaceId, projectId: body.projectId, shotId: body.shotId, template: shot.template, templateVersion: shot.templateVersion, specSnapshot: shot.spec }, { create: (value) => store.createRenderJob(value), get: (id) => store.getRenderJob(id, workspaceId) as any, update: (id, update) => store.updateRenderJob(id, { status: update.status, progress: update.progress, error_code: update.errorCode, error_message: update.errorMessage, completed_at: new Date().toISOString() }) }, { publish: async (message) => { const queueUrl = process.env.RENDER_QUEUE_URL; if (!queueUrl) throw new Error("render queue is not configured"); const response = await fetch(queueUrl, { method: "POST", headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.RENDER_WORKER_SECRET || ""}` }, body: JSON.stringify(message) }); if (!response.ok) throw new Error(queueRejectionMessage(response.status, await response.text())); } }, status.renderer.capabilities);
     const current = await store.getRenderJob(job.id, workspaceId);
     const visibleJobs = await store.listRenderJobs(workspaceId, body.projectId);
     const visibleJob = visibleJobs.find((item) => item.id === job.id);

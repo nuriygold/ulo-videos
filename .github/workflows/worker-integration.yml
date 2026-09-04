@@ -1,0 +1,42 @@
+name: Worker integration
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/worker-integration.yml"
+      - "worker/**"
+      - "public/demo/demo-character.blend"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/worker-integration.yml"
+      - "worker/**"
+      - "public/demo/demo-character.blend"
+  workflow_dispatch:
+
+jobs:
+  amd64-worker-integration:
+    name: amd64 Blender worker fixtures
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build pinned Blender 5.2.1 amd64 worker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: worker/Dockerfile
+          platforms: linux/amd64
+          load: true
+          tags: ulo-videos-render-worker:integration
+
+      - name: Run toolchain, render, composition, and character fixtures
+        run: |
+          docker run --rm --platform linux/amd64 \
+            -v "$PWD/public/demo:/repo-public-demo:ro" \
+            ulo-videos-render-worker:integration \
+            python -m worker.integration_fixtures --repo-root /app --demo-asset /repo-public-demo/demo-character.blend

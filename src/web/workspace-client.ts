@@ -9,7 +9,7 @@ export type InterruptionDraft = {
 };
 
 import { upload } from "@vercel/blob/client";
-import { buildAssetBlobKey, type BrowserUploadRole } from "./asset-upload";
+import { buildAssetBlobKey, characterMimeTypeForFilename, isCharacterUploadFormatSupported, type BrowserUploadRole } from "./asset-upload";
 
 export type DemoFileRole = "source_video" | "character" | "logo";
 
@@ -29,22 +29,51 @@ export async function loadDemoFile(role: DemoFileRole, request: typeof fetch = f
   return new File([await response.blob()], descriptor.filename, { type: descriptor.mimeType });
 }
 
-export async function uploadAsset(file: File, workspaceId: string, projectId: string, role: BrowserUploadRole) {
+function isSvgLogo(file: File): boolean { return file.type === "image/svg+xml" || file.name.toLowerCase().endsWith(".svg"); }
+
+export async function rasterizeSvgLogo(file: File): Promise<File> {
+  const imageUrl = URL.createObjectURL(file);
+  try {
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const next = new Image();
+      next.onload = () => resolve(next); next.onerror = () => reject(new Error("SVG logo could not be rasterized.")); next.src = imageUrl;
+    });
+    const canvas = document.createElement("canvas");
+    canvas.width = image.naturalWidth || image.width; canvas.height = image.naturalHeight || image.height;
+    if (!canvas.width || !canvas.height) throw new Error("SVG logo has no drawable dimensions.");
+    canvas.getContext("2d")?.drawImage(image, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+    if (!blob) throw new Error("SVG logo could not be converted to PNG.");
+    return new File([blob], file.name.replace(/\.svg$/i, ".png"), { type: "image/png" });
+  } finally { URL.revokeObjectURL(imageUrl); }
+}
+
+export async function fileForBrowserUpload(file: File, role: BrowserUploadRole, rasterize = rasterizeSvgLogo): Promise<File> {
+  return role === "logo" && isSvgLogo(file) ? rasterize(file) : file;
+}
+
+export async function uploadAsset(file: File, workspaceId: string, projectId: string, role: BrowserUploadRole, options: { characterFormats?: readonly string[] } = {}) {
+  const body = await fileForBrowserUpload(file, role);
+  if (role === "character" && !isCharacterUploadFormatSupported(body.name, options.characterFormats || [])) {
+    throw new Error("The active renderer does not support this character file format.");
+  }
   const assetId = `a_${crypto.randomUUID()}`;
-  const contentType = role === "character" ? "application/x-blender" : file.type;
-  const intent = { assetId, workspaceId, projectId, role, filename: file.name };
+  const contentType = role === "character" ? characterMimeTypeForFilename(body.name, body.type) : body.type;
+  const intent = { assetId, workspaceId, projectId, role, filename: body.name };
   const pathname = buildAssetBlobKey(intent);
-  const body = contentType && file.type !== contentType ? new File([file], file.name, { type: contentType }) : file;
-  const blob = await upload(pathname, body, { access: "public", handleUploadUrl: "/api/assets/upload", clientPayload: JSON.stringify(intent), contentType, multipart: file.size > 25 * 1024 * 1024 });
+  const uploadBody = contentType && body.type !== contentType ? new File([body], body.name, { type: contentType }) : body;
+  const blob = await upload(pathname, uploadBody, { access: "public", handleUploadUrl: "/api/assets/upload", clientPayload: JSON.stringify(intent), contentType, multipart: uploadBody.size > 25 * 1024 * 1024 });
   return blob.url;
 }
 
 export function buildInterruptionScene(draft: InterruptionDraft) {
-  return { template: "interruption_spokescharacter_v1", version: 1, source: { video: draft.sourceVideo }, trigger: { type: "timestamp", value: Number(draft.pauseAt) }, background: { action: "freeze" }, elements: [{ id: "spokesperson", type: "character", asset: draft.characterAsset, position: draft.position, entrance: { type: draft.entrance }, performance: { gesture: draft.gesture }, dialogue: { text: draft.dialogueText, voice: draft.voice, lip_sync: draft.lipSync } }], captions: { enabled: draft.captionsEnabled, style: draft.captionStyle }, branding: { logo: draft.logo }, continuation: { action: "resume" }, output: { format: "mp4", width: Number(draft.width), height: Number(draft.height), fps: Number(draft.fps) } };
+  const character = { id: "spokesperson", type: "character", asset: draft.characterAsset, position: draft.position, entrance: { type: draft.entrance }, performance: { gesture: draft.gesture }, dialogue: { text: draft.dialogueText, voice: draft.voice, lip_sync: draft.lipSync } };
+  return { template: "interruption_spokescharacter_v1", version: 1, source: { video: draft.sourceVideo }, trigger: { type: "timestamp", value: Number(draft.pauseAt) }, background: { action: "freeze" }, elements: [character], captions: { enabled: draft.captionsEnabled, style: draft.captionStyle }, branding: { logo: draft.logo }, continuation: { action: "resume" }, output: { format: "mp4", width: Number(draft.width), height: Number(draft.height), fps: Number(draft.fps) } };
 }
 
-async function api<T>(url: string, body: unknown, request: typeof fetch = fetch): Promise<T> { const response = await request(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }); const data = await response.json() as T & { error?: string }; if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`); return data; }
-async function get<T>(url: string, request: typeof fetch = fetch): Promise<T> { const response = await request(url); const data = await response.json() as T & { error?: string }; if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`); return data; }
+async function responsePayload<T>(response: Response): Promise<T & { error?: string }> { const text = await response.text(); if (!text) return {} as T & { error?: string }; try { return JSON.parse(text) as T & { error?: string }; } catch { return { error: text } as T & { error?: string }; } }
+async function api<T>(url: string, body: unknown, request: typeof fetch = fetch): Promise<T> { const response = await request(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }); const data = await responsePayload<T>(response); if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`); return data; }
+async function get<T>(url: string, request: typeof fetch = fetch): Promise<T> { const response = await request(url); const data = await responsePayload<T>(response); if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`); return data; }
 export async function createProject(name: string, request = fetch) { return (await api<{ project: { id: string; name: string; workspaceId: string } }>("/api/projects", { name }, request)).project; }
 export async function listProjects(request = fetch) { return (await get<{ projects: Array<{ id: string; name: string; workspaceId: string }> }>("/api/projects", request)).projects; }
 export async function listRenderJobs(projectId: string | undefined, request = fetch) { return (await get<{ jobs: Array<{ id: string; status: string; progress: number; output_asset_id?: string; output_url?: string; error_message?: string }> }>(`/api/render-jobs${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ""}`, request)).jobs; }

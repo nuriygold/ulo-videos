@@ -11,7 +11,7 @@ for base in (here.parent, Path.cwd()):
     if (source / "ulo_videos" / "cloud_worker.py").is_file() and str(source) not in sys.path:
         sys.path.insert(0, str(source))
 
-from ulo_videos.cloud_worker import queue_message, render_cloud_job
+from ulo_videos.cloud_worker import fallback_health, queue_message, render_cloud_job
 
 
 def _response(start_response, status, body):
@@ -21,6 +21,8 @@ def _response(start_response, status, body):
 
 
 def app(environ, start_response):
+    if environ.get("REQUEST_METHOD") == "GET":
+        return _response(start_response, "200 OK", fallback_health())
     if environ.get("REQUEST_METHOD") != "POST":
         return _response(start_response, "405 Method Not Allowed", {"error": "POST required"})
     length = int(environ.get("CONTENT_LENGTH") or 0)

@@ -1,4 +1,5 @@
 import { createRenderJobMessage, type RenderJobMessage, type RenderStage } from "./contracts";
+import { isCharacterUploadFormatSupported } from "./asset-upload";
 
 export type RenderJob = {
   id: string;
@@ -23,10 +24,43 @@ export interface RenderQueue {
   publish(message: RenderJobMessage): Promise<void>;
 }
 
-export async function submitRenderJob(input: Omit<RenderJob, "status" | "progress" | "attempt" | "specSnapshot"> & { specSnapshot: Record<string, unknown> }, repository: JobRepository, queue: RenderQueue): Promise<RenderJob> {
+type RenderCapabilityGate = {
+  character?: boolean;
+  speech?: boolean;
+  lipSync?: boolean;
+  characterFormats?: readonly string[];
+};
+
+const FALLBACK_RENDERER_CAPABILITIES: RenderCapabilityGate = { character: false, speech: false, lipSync: false, characterFormats: [] };
+
+function hasValue(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function characterExtensionFromUrl(value: string): string {
+  try {
+    return new URL(value).pathname;
+  } catch {
+    return value;
+  }
+}
+
+export function validateRendererCapabilitiesForScene(specSnapshot: Record<string, unknown>, capabilities: RenderCapabilityGate = FALLBACK_RENDERER_CAPABILITIES): void {
+  const elements = Array.isArray(specSnapshot.elements) ? specSnapshot.elements : [];
+  const character = elements.find((item): item is Record<string, unknown> => Boolean(item && typeof item === "object" && (item as Record<string, unknown>).type === "character"));
+  if (!character) return;
+  const asset = character.asset;
+  if (hasValue(asset) && capabilities.character && !isCharacterUploadFormatSupported(characterExtensionFromUrl(asset), capabilities.characterFormats || [])) {
+    throw new Error("The active renderer does not support this character file format.");
+  }
+}
+
+export async function submitRenderJob(input: Omit<RenderJob, "status" | "progress" | "attempt" | "specSnapshot"> & { specSnapshot: Record<string, unknown> }, repository: JobRepository, queue: RenderQueue, capabilities: RenderCapabilityGate = FALLBACK_RENDERER_CAPABILITIES): Promise<RenderJob> {
+  const specSnapshot = structuredClone(input.specSnapshot);
+  validateRendererCapabilitiesForScene(specSnapshot, capabilities);
   const job: RenderJob = {
     ...input,
-    specSnapshot: structuredClone(input.specSnapshot),
+    specSnapshot,
     status: "queued",
     progress: 0,
     attempt: 1,

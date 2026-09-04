@@ -1,23 +1,57 @@
 """Deployable authenticated HTTP endpoint for external cloud rendering."""
 
+import glob
 import json
 import os
 import shutil
 import subprocess
 import tempfile
+import threading
+import time
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from .control_plane import SupabaseBlobControlPlane
 from .http_contract import authenticate_render_request
-from .pipeline import UnsupportedPerformanceError, build_composite_plan
+from .pipeline import HOLD_SECONDS, build_composite_plan
 
 
 def _run(argv):
     result = subprocess.run(argv, capture_output=True, text=True, check=False, timeout=900)
     if result.returncode:
         raise RuntimeError(result.stderr[-2000:] or f"{argv[0]} failed")
+
+
+def _character_frame_paths(frame_pattern):
+    pattern = str(frame_pattern).replace("%05d", "*")
+    return sorted(Path(item) for item in glob.glob(pattern))
+
+
+def prepare_character_frame_directory(frame_pattern):
+    frame_dir = Path(frame_pattern).parent
+    if frame_dir.exists():
+        shutil.rmtree(frame_dir)
+    frame_dir.mkdir(parents=True, exist_ok=True)
+    return time.time_ns()
+
+
+def verify_character_frames(frame_pattern, expected_frames, started_at_ns):
+    frames = _character_frame_paths(frame_pattern)
+    expected_names = {str(frame_pattern) % frame for frame in range(1, expected_frames + 1)}
+    actual_names = {str(frame) for frame in frames}
+    missing = sorted(expected_names - actual_names)
+    unexpected = sorted(actual_names - expected_names)
+    if missing or unexpected:
+        details = []
+        if missing:
+            details.append(f"missing {len(missing)} expected character frame(s)")
+        if unexpected:
+            details.append(f"found {len(unexpected)} unexpected character frame(s)")
+        raise RuntimeError("Blender completed without producing a fresh complete character frame sequence: " + "; ".join(details))
+    stale = [frame for frame in frames if not frame.is_file() or frame.stat().st_size <= 0 or frame.stat().st_mtime_ns < started_at_ns]
+    if stale:
+        raise RuntimeError("Blender completed with stale, empty, or invalid character frame(s)")
 
 
 def execute_render_job(job_id, control_plane, *, worker_id=None, run_command=_run):
@@ -42,7 +76,9 @@ def execute_render_job(job_id, control_plane, *, worker_id=None, run_command=_ru
         control_plane.update_job(job_id, status="building_scene", progress=30)
         if plan.rasterize_logo:
             run_command(["rsvg-convert", str(plan.logo_source), "-o", str(plan.logo_image)])
+        frame_start_ns = prepare_character_frame_directory(plan.character_frames)
         run_command(plan.blender_argv)
+        verify_character_frames(plan.character_frames, HOLD_SECONDS * int(job["spec_snapshot"]["output"]["fps"]), frame_start_ns)
         control_plane.update_job(job_id, status="rendering", progress=55)
         control_plane.update_job(job_id, status="encoding", progress=70)
         run_command(plan.ffmpeg_argv)
@@ -54,17 +90,28 @@ def execute_render_job(job_id, control_plane, *, worker_id=None, run_command=_ru
         control_plane.update_job(job_id, **completed)
         return {"jobId": job_id, "outputAssetId": output_asset_id, **completed}
     except Exception as error:
-        error_code = "unsupported_performance" if isinstance(error, UnsupportedPerformanceError) else "render_failed"
-        failure = {"status": "failed", "progress": 100, "error_code": error_code, "error_message": str(error)[:2000]}
+        failure = {"status": "failed", "progress": 100, "error_code": "render_failed", "error_message": str(error)[:2000]}
         control_plane.update_job(job_id, **failure)
         raise
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
 
 
+_in_progress_lock = threading.Lock()
+_in_progress_jobs = set()
+
+
 def dispatch_render_job(job_id, control_plane, *, execute=execute_render_job):
-    """Run synchronously so a successful response cannot lose a daemon thread."""
-    return execute(job_id, control_plane)
+    """Run synchronously while rejecting duplicate in-flight work for one job."""
+    with _in_progress_lock:
+        if job_id in _in_progress_jobs:
+            return {"jobId": job_id, "status": "rendering", "progress": 0}
+        _in_progress_jobs.add(job_id)
+    try:
+        return execute(job_id, control_plane)
+    finally:
+        with _in_progress_lock:
+            _in_progress_jobs.discard(job_id)
 
 
 def executable_status(*, which=shutil.which, run=subprocess.run):
@@ -80,7 +127,8 @@ def executable_status(*, which=shutil.which, run=subprocess.run):
 
     ffmpeg = ready("ffmpeg", ["-version"])
     blender = ready("blender", ["--background", "--version"])
-    return {"ok": ffmpeg and blender, "ffmpeg": ffmpeg, "blender": blender}
+    rsvg_convert = ready("rsvg-convert", ["--version"])
+    return {"ok": ffmpeg and blender and rsvg_convert, "ffmpeg": ffmpeg, "blender": blender, "rsvg_convert": rsvg_convert}
 
 
 class RenderRequestHandler(BaseHTTPRequestHandler):
@@ -100,7 +148,11 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/healthz":
             status = self.health_checker()
-            self._json(HTTPStatus.OK if status["ok"] else HTTPStatus.SERVICE_UNAVAILABLE, status)
+            self._json(HTTPStatus.OK if status["ok"] else HTTPStatus.SERVICE_UNAVAILABLE, {
+                "ok": status["ok"], "mode": "external_worker",
+                "capabilities": {"freezeResume": True, "logo": True, "captions": True, "character": True, "sourceAudio": False, "speech": False, "lipSync": False, "characterFormats": [".blend", ".gltf", ".glb", ".fbx"]},
+                **status,
+            })
         elif self.path == "/render-jobs":
             self._method_not_allowed()
         else:
