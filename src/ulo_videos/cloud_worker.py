@@ -8,7 +8,10 @@ import subprocess
 import tarfile
 import tempfile
 from pathlib import Path
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
+
+from .renderers import _escape_drawtext_text
 
 
 def download_request(url):
@@ -28,9 +31,49 @@ def queue_message(raw_body, authorization, expected_secret):
     return {"renderJobId": job_id}
 
 
-def ffmpeg_command(source, output, trigger, width, height, fps):
-    filters = f"trim=end={trigger},tpad=stop_mode=clone:stop_duration=2,scale={width}:{height},fps={fps}"
-    return ["ffmpeg", "-y", "-i", source, "-vf", filters, "-c:v", "libx264", "-pix_fmt", "yuv420p", "-an", "-f", "mp4", output]
+def _caption_text(text):
+    return _escape_drawtext_text(str(text))
+
+
+def _caption_position(style):
+    positions = {
+        "lower_third": "x=(w-text_w)/2:y=h-th-60",
+        "top": "x=(w-text_w)/2:y=60",
+        "center": "x=(w-text_w)/2:y=(h-text_h)/2",
+    }
+    return positions.get(style, positions["lower_third"])
+
+
+def _number(value):
+    return f"{float(value):.6f}".rstrip("0").rstrip(".") or "0"
+
+
+def ffmpeg_command(source, output, trigger, width, height, fps, *, logo=None, caption_text=None, caption_style="none"):
+    """Build the hosted deterministic freeze, branding, and caption render."""
+    freeze_duration = 2
+    trigger = _number(trigger)
+    end = _number(float(trigger) + freeze_duration)
+    frame_end = _number(float(trigger) + (1 / float(fps)))
+    input_args = ["ffmpeg", "-y", "-i", source]
+    graph = [
+        "[0:v]split=3[before_source][freeze_source][after_source]",
+        f"[before_source]trim=end={trigger},setpts=PTS-STARTPTS[before]",
+        f"[freeze_source]trim=start={trigger}:end={frame_end},setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration={freeze_duration}[hold]",
+        f"[after_source]trim=start={trigger},setpts=PTS-STARTPTS[after]",
+        f"[before][hold][after]concat=n=3:v=1:a=0,scale={width}:{height},fps={fps}[background]",
+    ]
+    video = "background"
+    if logo:
+        input_args.extend(["-loop", "1", "-i", logo])
+        graph.append("[1:v]format=rgba,scale=360:-1[logo]")
+        graph.append(f"[{video}][logo]overlay=W-w-48:H-h-48:shortest=1[branded]")
+        video = "branded"
+    if caption_text and caption_style != "none":
+        graph.append(
+            f"[{video}]drawtext=text='{_caption_text(caption_text)}':expansion=none:font='DejaVu Sans':fontcolor=white:fontsize=42:box=1:boxcolor=black@0.65:boxborderw=18:{_caption_position(caption_style)}:enable='between(t,{trigger},{end})'[captioned]"
+        )
+        video = "captioned"
+    return input_args + ["-filter_complex", ";".join(graph), "-map", f"[{video}]", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-an", "-f", "mp4", output]
 
 
 def _json_request(url, *, method="GET", token=None, payload=None):
@@ -101,14 +144,31 @@ def render_cloud_job(job_id, callback_origin):
     source_url = scene["source"]["video"]
     output = Path(tempfile.mkdtemp(prefix=f"ulo-{job_id}-"))
     source = output / "input.mp4"
+    logo = None
     rendered = output / "output.mp4"
     try:
         _update_job(job_id, status="preparing", progress=5)
         _update_job(job_id, status="downloading_assets", progress=15)
         with urlopen(download_request(source_url), timeout=120) as response, source.open("wb") as destination:
             shutil.copyfileobj(response, destination)
+        logo_url = scene.get("branding", {}).get("logo")
+        if isinstance(logo_url, str) and logo_url:
+            suffix = Path(urlparse(logo_url).path).suffix or ".png"
+            logo = output / f"logo{suffix}"
+            with urlopen(download_request(logo_url), timeout=120) as response, logo.open("wb") as destination:
+                shutil.copyfileobj(response, destination)
         _update_job(job_id, status="rendering", progress=45)
-        command = ffmpeg_command(str(source), str(rendered), scene["trigger"]["value"], scene["output"]["width"], scene["output"]["height"], scene["output"]["fps"])
+        command = ffmpeg_command(
+            str(source),
+            str(rendered),
+            scene["trigger"]["value"],
+            scene["output"]["width"],
+            scene["output"]["height"],
+            scene["output"]["fps"],
+            logo=str(logo) if logo else None,
+            caption_text=scene.get("elements", [{}])[0].get("dialogue", {}).get("text"),
+            caption_style=scene.get("captions", {}).get("style", "none") if scene.get("captions", {}).get("enabled") else "none",
+        )
         command[0] = _ffmpeg_binary()
         result = subprocess.run(command, capture_output=True, text=True, timeout=240, check=False)
         if result.returncode or not rendered.is_file():

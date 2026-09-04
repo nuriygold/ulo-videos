@@ -58,11 +58,11 @@ fieldset > label { margin-bottom: 12px; }
 .output-card .eyebrow { margin: 0; }
 .output-video { display: block; width: 100%; border-radius: 8px; background: #18201e; }
 .setup-card h2 { margin-top: 6px; }
-.setup-card ul { list-style: none; padding: 0; margin: 20px 0 0; display: grid; gap: 17px; }
-.setup-card li { display: grid; gap: 3px; }
-.setup-card li strong { color: var(--accent); }
-.setup-card li.missing strong { color: #b46b16; }
-.setup-card li span { font-size: 13px; color: var(--muted); }
+.instruction-list { list-style: none; counter-reset: instructions; padding: 0; margin: 20px 0 0; display: grid; gap: 17px; }
+.instruction-list li { counter-increment: instructions; display: grid; gap: 4px; padding-left: 30px; position: relative; }
+.instruction-list li::before { content: counter(instructions); position: absolute; top: 0; left: 0; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--soft); color: var(--accent); font-size: 12px; font-weight: 800; }
+.instruction-list li strong { color: var(--accent); }
+.instruction-list li span { font-size: 13px; color: var(--muted); }
 .file-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; }
 .demo-button { white-space: nowrap; padding: 10px 12px; font-size: 13px; }
 .file-picker { display: block; position: relative; border: 1px solid #c6c8bf; border-radius: 8px; background: #fff; padding: 10px 11px; cursor: pointer; }
