@@ -17,7 +17,7 @@ from worker.pipeline import build_composite_plan
 from worker.service import executable_status
 
 PNG_1X1_TRANSPARENT = base64.b64decode(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADElEQVR42mNk+M/wHwAF/gL+24dD2QAAAABJRU5ErkJggg=="
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
 )
 # The plan originally called for a Blender 5.0.2 demo asset, but the official
 # Blender 5.0 archive currently publishes 5.0.0 and 5.0.1 only. The checked-in
