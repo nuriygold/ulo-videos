@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -96,9 +97,21 @@ def execute_render_job(job_id, control_plane, *, worker_id=None, run_command=_ru
         shutil.rmtree(workdir, ignore_errors=True)
 
 
+_in_progress_lock = threading.Lock()
+_in_progress_jobs = set()
+
+
 def dispatch_render_job(job_id, control_plane, *, execute=execute_render_job):
-    """Run synchronously so a successful response cannot lose a daemon thread."""
-    return execute(job_id, control_plane)
+    """Run synchronously while rejecting duplicate in-flight work for one job."""
+    with _in_progress_lock:
+        if job_id in _in_progress_jobs:
+            return {"jobId": job_id, "status": "rendering", "progress": 0}
+        _in_progress_jobs.add(job_id)
+    try:
+        return execute(job_id, control_plane)
+    finally:
+        with _in_progress_lock:
+            _in_progress_jobs.discard(job_id)
 
 
 def executable_status(*, which=shutil.which, run=subprocess.run):

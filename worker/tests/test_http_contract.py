@@ -18,12 +18,44 @@ class HttpContractTests(unittest.TestCase):
             authenticate_render_request(b'{"renderJobId":"rj_123"}', "Bearer wrong", "shared-secret")
         with self.assertRaises(ValueError):
             authenticate_render_request(b'{"jobId":"rj_123"}', "Bearer shared-secret", "shared-secret")
+        for unsafe_id in ("rj_../secret", "rj_..\\secret", "rj_", "job_123"):
+            with self.assertRaises(ValueError):
+                authenticate_render_request(json.dumps({"renderJobId": unsafe_id}).encode(), "Bearer shared-secret", "shared-secret")
+        self.assertEqual(
+            authenticate_render_request(b'{"renderJobId":"rj_abc-123_DEF"}', "Bearer shared-secret", "shared-secret"),
+            "rj_abc-123_DEF",
+        )
 
     def test_dispatch_runs_synchronously_and_returns_completed_result(self):
         from worker.service import dispatch_render_job
 
         result = dispatch_render_job("rj_123", object(), execute=lambda job_id, plane: {"jobId": job_id, "status": "completed"})
         self.assertEqual(result, {"jobId": "rj_123", "status": "completed"})
+
+    def test_dispatch_deduplicates_in_progress_render_requests(self):
+        from worker.service import dispatch_render_job
+
+        calls = []
+        started = threading.Event()
+        release = threading.Event()
+
+        def execute(job_id, plane):
+            calls.append(job_id)
+            started.set()
+            release.wait(timeout=3)
+            return {"jobId": job_id, "status": "completed"}
+
+        first_result = []
+        first = threading.Thread(target=lambda: first_result.append(dispatch_render_job("rj_123", object(), execute=execute)))
+        first.start()
+        self.assertTrue(started.wait(timeout=3))
+        duplicate = dispatch_render_job("rj_123", object(), execute=execute)
+        release.set()
+        first.join(timeout=3)
+
+        self.assertEqual(calls, ["rj_123"])
+        self.assertEqual(duplicate, {"jobId": "rj_123", "status": "rendering", "progress": 0})
+        self.assertEqual(first_result, [{"jobId": "rj_123", "status": "completed"}])
 
     def test_health_reports_not_ready_when_media_executable_is_missing(self):
         from worker.service import executable_status

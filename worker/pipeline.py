@@ -61,6 +61,10 @@ def _ffmpeg_text(value: str) -> str:
     return value.replace("\\", r"\\").replace("'", r"\'").replace(":", r"\:").replace("%", r"\%").replace("\n", r"\n")
 
 
+def _number(value: float) -> str:
+    return f"{value:.6f}".rstrip("0").rstrip(".") or "0"
+
+
 def _character_position(position: str) -> tuple[str, str]:
     positions = {
         "foreground_left": ("0", "0"),
@@ -132,7 +136,7 @@ def build_composite_plan(scene: dict, workdir: Union[str, Path]) -> CompositePla
     before = f"[before_source]trim=end={trigger},setpts=PTS-STARTPTS[before]"
     after = f"[after_source]trim=start={trigger},setpts=PTS-STARTPTS[after]"
     hold = (
-        f"[freeze_source]trim=end={trigger},reverse,trim=end={1 / fps},reverse,"
+        f"[freeze_source]trim=start={_number(float(trigger))}:end={_number(float(trigger) + (1 / fps))},"
         f"setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration={HOLD_SECONDS}[hold]"
     )
     caption_filter = ""

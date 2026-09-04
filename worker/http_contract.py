@@ -2,6 +2,10 @@
 
 import hmac
 import json
+import re
+
+
+RENDER_JOB_ID_PATTERN = re.compile(r"^rj_[A-Za-z0-9_-]{1,120}$")
 
 
 def authenticate_render_request(raw_body, authorization, expected_secret):
@@ -15,6 +19,6 @@ def authenticate_render_request(raw_body, authorization, expected_secret):
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
         raise ValueError("request body must be JSON") from error
     job_id = payload.get("renderJobId") if isinstance(payload, dict) else None
-    if not isinstance(job_id, str) or not job_id.startswith("rj_") or not job_id.strip() or len(job_id) > 124:
+    if not isinstance(job_id, str) or not RENDER_JOB_ID_PATTERN.fullmatch(job_id):
         raise ValueError("renderJobId is required")
     return job_id

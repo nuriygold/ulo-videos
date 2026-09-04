@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -12,6 +13,9 @@ from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 from .renderers import _escape_drawtext_text
+
+
+RENDER_JOB_ID_PATTERN = re.compile(r"^rj_[A-Za-z0-9_-]{1,120}$")
 
 
 def fallback_health():
@@ -37,7 +41,7 @@ def queue_message(raw_body, authorization, expected_secret):
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
         raise ValueError("request body must be JSON") from error
     job_id = payload.get("renderJobId") if isinstance(payload, dict) else None
-    if not isinstance(job_id, str) or not job_id.startswith("rj_") or len(job_id) > 124:
+    if not isinstance(job_id, str) or not RENDER_JOB_ID_PATTERN.fullmatch(job_id):
         raise ValueError("renderJobId is required")
     return {"renderJobId": job_id}
 
@@ -87,12 +91,12 @@ def ffmpeg_command(source, output, trigger, width, height, fps, *, logo=None, ca
     return input_args + ["-filter_complex", ";".join(graph), "-map", f"[{video}]", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-an", "-f", "mp4", output]
 
 
-def _json_request(url, *, method="GET", token=None, payload=None):
+def _json_request(url, *, method="GET", token=None, payload=None, prefer="return=representation"):
     body = json.dumps(payload).encode() if payload is not None else None
     headers = {"apikey": token, "Authorization": f"Bearer {token}"} if token else {}
     if body is not None:
         headers["Content-Type"] = "application/json"
-        headers["Prefer"] = "return=representation"
+        headers["Prefer"] = prefer
     with urlopen(Request(url, data=body, headers=headers, method=method), timeout=45) as response:
         raw = response.read()
     return json.loads(raw.decode()) if raw else None
@@ -108,7 +112,20 @@ def _update_job(job_id, *, status, progress, output_asset_id=None, error_code=No
         update["error_code"] = error_code
     if error_message:
         update["error_message"] = error_message[:2000]
-    _json_request(f"{base}/rest/v1/render_jobs?id=eq.{job_id}", method="PATCH", token=token, payload=update)
+    rows = _json_request(f"{base}/rest/v1/render_jobs?id=eq.{job_id}", method="PATCH", token=token, payload=update)
+    if rows == []:
+        raise ValueError("render job not found during update")
+
+
+def _caption_text_from_scene(scene):
+    for element in scene.get("elements", []):
+        if isinstance(element, dict) and element.get("type") == "character":
+            dialogue = element.get("dialogue")
+            if isinstance(dialogue, dict):
+                text = dialogue.get("text")
+                if isinstance(text, str):
+                    return text
+    return None
 
 
 def _ffmpeg_binary():
@@ -132,15 +149,36 @@ def _ffmpeg_binary():
     return str(target)
 
 
-def _put_blob(pathname, data, token):
-    request = Request(
-        f"https://blob.vercel-storage.com/{pathname}",
-        data=data,
-        method="PUT",
-        headers={"Authorization": f"Bearer {token}", "x-api-version": "7", "x-content-type": "video/mp4", "Content-Type": "application/octet-stream"},
+def _put_blob(pathname, output_path, token):
+    path = Path(output_path)
+    with path.open("rb") as data:
+        request = Request(
+            f"https://blob.vercel-storage.com/{pathname}",
+            data=data,
+            method="PUT",
+            headers={
+                "Authorization": f"Bearer {token}", "x-api-version": "7",
+                "x-content-type": "video/mp4", "Content-Type": "application/octet-stream",
+                "Content-Length": str(path.stat().st_size),
+            },
+        )
+        with urlopen(request, timeout=120) as response:
+            return json.loads(response.read().decode())
+
+
+def _create_output_asset(job, pathname, blob_url, size):
+    base = os.environ["SUPABASE_URL"].rstrip("/")
+    token = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+    asset_id = f"asset_{job['id']}"
+    _json_request(
+        f"{base}/rest/v1/assets?on_conflict=id", method="POST", token=token,
+        prefer="return=representation,resolution=merge-duplicates",
+        payload={
+            "id": asset_id, "workspace_id": job["workspace_id"], "project_id": job["project_id"],
+            "blob_key": pathname, "blob_url": blob_url, "role": "render_output", "mime_type": "video/mp4", "bytes": size,
+        },
     )
-    with urlopen(request, timeout=120) as response:
-        return json.loads(response.read().decode())
+    return asset_id
 
 
 def render_cloud_job(job_id, callback_origin):
@@ -177,7 +215,7 @@ def render_cloud_job(job_id, callback_origin):
             scene["output"]["height"],
             scene["output"]["fps"],
             logo=str(logo) if logo else None,
-            caption_text=scene.get("elements", [{}])[0].get("dialogue", {}).get("text"),
+            caption_text=_caption_text_from_scene(scene),
             caption_style=scene.get("captions", {}).get("style", "none") if scene.get("captions", {}).get("enabled") else "none",
         )
         command[0] = _ffmpeg_binary()
@@ -186,9 +224,8 @@ def render_cloud_job(job_id, callback_origin):
             raise RuntimeError(result.stderr[-2000:] or "ffmpeg did not produce output.mp4")
         _update_job(job_id, status="uploading", progress=85)
         pathname = f"workspaces/{job['workspace_id']}/renders/{job_id}.mp4"
-        blob = _put_blob(pathname, rendered.read_bytes(), os.environ["BLOB_READ_WRITE_TOKEN"])
-        asset_id = f"asset_{job_id}"
-        _json_request(f"{base}/rest/v1/assets", method="POST", token=token, payload={"id": asset_id, "workspace_id": job["workspace_id"], "project_id": job["project_id"], "blob_key": pathname, "blob_url": blob["url"], "role": "render_output", "mime_type": "video/mp4", "bytes": rendered.stat().st_size})
+        blob = _put_blob(pathname, rendered, os.environ["BLOB_READ_WRITE_TOKEN"])
+        asset_id = _create_output_asset(job, pathname, blob["url"], rendered.stat().st_size)
         _update_job(job_id, status="completed", progress=100, output_asset_id=asset_id)
         return {"jobId": job_id, "status": "completed", "outputAssetId": asset_id}
     except Exception as error:

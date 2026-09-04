@@ -52,6 +52,18 @@ test("buildInterruptionScene maps editor state to the deterministic Scene v1 con
   });
 });
 
+test("buildInterruptionScene supports fallback scenes without character assets", () => {
+  assert.deepEqual(buildInterruptionScene({ ...draft, characterAsset: "", voice: "legacy-voice", lipSync: "legacy-lip-sync" }).elements, [{
+    id: "spokesperson",
+    type: "character",
+    asset: "",
+    position: "foreground_right",
+    entrance: { type: "slide_left" },
+    performance: { gesture: "shrug_and_point" },
+    dialogue: { text: "Wait — there is a clearer way.", voice: "legacy-voice", lip_sync: "legacy-lip-sync" },
+  }]);
+});
+
 test("workspace API helpers use the project, shot, and render contracts in order", async () => {
   const calls: Array<{ url: string; body: unknown }> = [];
   const responses = [
@@ -80,6 +92,11 @@ test("workspace API helpers use the project, shot, and render contracts in order
 test("workspace API helpers surface server errors to the editor", async () => {
   const request = async () => Response.json({ error: "render queue is not configured" }, { status: 503 });
   await assert.rejects(createProject("Launch film", request), /render queue is not configured/);
+});
+
+test("workspace API helpers preserve non-JSON server error bodies", async () => {
+  const request = async () => new Response("dispatcher unavailable", { status: 502 });
+  await assert.rejects(createProject("Launch film", request), /dispatcher unavailable/);
 });
 
 test("demo file descriptors point at bundled assets with the correct upload MIME", () => {

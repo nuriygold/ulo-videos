@@ -127,6 +127,21 @@ test("shot input accepts a valid deterministic Scene v1 snapshot", () => {
   });
 });
 
+test("shot input accepts fallback snapshots without a character asset", () => {
+  const fallbackScene = { ...validScene, elements: [{ ...validScene.elements[0], asset: "" }] };
+  assert.deepEqual(parseShotInput({
+    name: "  Fallback shot  ",
+    template: "interruption_spokescharacter_v1",
+    templateVersion: 1,
+    spec: fallbackScene,
+  }), {
+    name: "Fallback shot",
+    template: "interruption_spokescharacter_v1",
+    templateVersion: 1,
+    spec: fallbackScene,
+  });
+});
+
 test("shot input rejects malformed scenes and mismatched template metadata", () => {
   assert.throws(() => parseShotInput({ name: "Shot", template: validScene.template, spec: { ...validScene, output: { ...validScene.output, width: 0 } } }), /output\.width/i);
   assert.throws(() => parseShotInput({ name: "Shot", template: "other", spec: validScene }), /template/i);

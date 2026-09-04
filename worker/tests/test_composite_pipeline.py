@@ -39,7 +39,7 @@ class CompositePipelineTests(unittest.TestCase):
         self.assertEqual(plan.ffmpeg_argv.count("-i"), 3)
         filters = plan.ffmpeg_argv[plan.ffmpeg_argv.index("-filter_complex") + 1]
         self.assertIn("overlay=W-w-48:H-h-48", filters)
-        self.assertIn("[freeze_source]trim=end=7.4,reverse,trim=end=", filters)
+        self.assertIn("[freeze_source]trim=start=7.4:end=7.433333", filters)
         self.assertNotIn("[before]tpad", filters)
         self.assertIn("[before][hold][after]concat=n=3:v=1:a=0[assembled]", filters)
         self.assertIn("[assembled]scale=1920:1080,fps=30[scene]", filters)
@@ -260,6 +260,21 @@ class CompositePipelineTests(unittest.TestCase):
 
         result = execute_render_job("rj_123", ControlPlane(), run_command=lambda argv: self.fail("completed job must not run"))
         self.assertEqual(result, {"jobId": "rj_123", "status": "completed", "progress": 100, "outputAssetId": "asset_rj_123"})
+
+    def test_trigger_at_zero_uses_first_frame_for_freeze_instead_of_empty_trim(self):
+        from worker.pipeline import build_composite_plan
+
+        scene = {
+            "source": {"video": "https://storage.example/source.mp4"}, "trigger": {"type": "timestamp", "value": 0},
+            "elements": [{"type": "character", "asset": "https://storage.example/lizard.blend", "position": "foreground_right", "entrance": {"type": "pop_in"}, "performance": {"gesture": "wave"}, "dialogue": {"text": "Speak", "voice": "", "lip_sync": ""}}],
+            "captions": {"enabled": False, "style": "none"}, "branding": {"logo": "https://storage.example/logo.svg"},
+            "output": {"width": 1920, "height": 1080, "fps": 30},
+        }
+
+        plan = build_composite_plan(scene, "/tmp/zero-trigger")
+        filters = plan.ffmpeg_argv[plan.ffmpeg_argv.index("-filter_complex") + 1]
+        self.assertIn("[freeze_source]trim=start=0:end=0.033333", filters)
+        self.assertNotIn("[freeze_source]trim=end=0,reverse", filters)
 
     def test_legacy_voice_and_lip_sync_values_still_plan_a_silent_captioned_render(self):
         from worker.pipeline import build_composite_plan

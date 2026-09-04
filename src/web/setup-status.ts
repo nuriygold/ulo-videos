@@ -28,10 +28,20 @@ export function fallbackRendererHealth(reachable = false): RendererHealth {
   return { mode: "vercel_fallback", reachable };
 }
 
-export async function rendererHealthForQueue(queueUrl: string | undefined, request: typeof fetch = fetch): Promise<RendererHealth> {
-  if (!queueUrl) return fallbackRendererHealth();
+function isHealthCapableFallbackQueue(queueUrl: string): boolean {
   try {
-    const response = await request(queueUrl, { method: "GET", cache: "no-store", signal: AbortSignal.timeout(5_000) });
+    const url = new URL(queueUrl);
+    return url.pathname === "/api/render-queue";
+  } catch {
+    return false;
+  }
+}
+
+export async function rendererHealthForQueue(queueUrl: string | undefined, request: typeof fetch = fetch, options: { healthUrl?: string } = {}): Promise<RendererHealth> {
+  const healthUrl = options.healthUrl || (queueUrl && isHealthCapableFallbackQueue(queueUrl) ? queueUrl : undefined);
+  if (!healthUrl) return fallbackRendererHealth(Boolean(queueUrl));
+  try {
+    const response = await request(healthUrl, { method: "GET", cache: "no-store", signal: AbortSignal.timeout(5_000) });
     const health = await response.json() as { ok?: unknown; mode?: unknown; capabilities?: { characterFormats?: unknown } };
     if (response.ok && health.ok === true && health.mode === "external_worker") {
       const characterFormats = Array.isArray(health.capabilities?.characterFormats)
