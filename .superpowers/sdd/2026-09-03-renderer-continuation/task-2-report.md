@@ -63,3 +63,41 @@
 ## Issues or concerns
 
 - The local machine has no `blender` executable, so real Blender 5.2.1 import/render fixtures were not run locally. The pinned Docker image and worker deployment remain outside this task’s scope, as requested.
+
+## Round 1 review fix report — 2026-09-04
+
+### Findings fixed
+
+- High: Browser character upload UI and save path now derive active accepted extensions/MIME types from `setup.renderer.capabilities.characterFormats`. When production reports the Vercel fallback with no character formats, the character picker, demo load button, and save action are blocked instead of accepting unsupported imported formats.
+- High: Worker rendering now clears the character frame directory before each Blender run in both the service and Blender script path. After Blender returns, the service verifies the exact expected `character_%05d.png` sequence exists, contains no extras, and contains non-empty frames before FFmpeg can run.
+- Medium voice/lip-sync behavior was intentionally left intact per recorded ruling.
+
+### Files changed in this round
+
+- `app/page.tsx`
+- `src/web/asset-upload.ts`
+- `src/web/workspace-client.ts`
+- `tests/web-asset-upload.test.ts`
+- `tests/web-instructions.test.ts`
+- `worker/blender_character.py`
+- `worker/service.py`
+- `worker/tests/test_composite_pipeline.py`
+
+### Commands run and summarized outputs
+
+- `npm test -- tests/web-asset-upload.test.ts tests/web-instructions.test.ts tests/web-setup-status.test.ts`
+  - First attempt failed because `tsx` was not installed in this isolated worktree.
+- `npm install`
+  - Installed 74 packages; audit reported 0 vulnerabilities.
+- `npm test -- tests/web-asset-upload.test.ts tests/web-instructions.test.ts tests/web-setup-status.test.ts`
+  - Passed: 48 tests, 0 failures.
+- `PYTHONPATH=.:src python3 -m unittest -v worker.tests.test_composite_pipeline.CompositePipelineTests.test_execution_reports_blender_then_encoding_before_upload worker.tests.test_composite_pipeline.CompositePipelineTests.test_stale_character_frames_are_removed_and_incomplete_blender_output_fails_before_ffmpeg worker.tests.test_composite_pipeline.CompositePipelineTests.test_import_validation_failure_is_reported_as_render_failed worker.tests.test_http_contract`
+  - Passed: 9 tests, 0 failures.
+- `npx tsc --noEmit`
+  - Passed.
+- `git diff --check`
+  - Passed.
+
+### Notes
+
+- Full `worker.tests.test_composite_pipeline` hangs on the existing FFmpeg integration test in this local sandbox even with a 600s timeout; the targeted stale-frame regression and HTTP contract tests pass. FFmpeg/ffprobe executables are present at `/opt/homebrew/bin/ffmpeg` and `/opt/homebrew/bin/ffprobe`.

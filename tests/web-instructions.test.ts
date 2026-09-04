@@ -9,8 +9,10 @@ test("workspace explains the complete interrupted-video workflow", () => {
 
   assert.match(markup, /How to create your interrupted video/);
   assert.match(markup, /Accepted video formats:.*MP4, MOV, or WebM/);
-  assert.match(markup, /compatible character/);
-  assert.match(markup, /\.blend, \.gltf, \.glb, or \.fbx/);
+  assert.match(markup, /Character file \(unavailable\)/);
+  assert.match(markup, /Character upload unavailable/);
+  assert.doesNotMatch(markup, /accept="\.blend,\.gltf,\.glb,\.fbx/);
+  assert.match(markup, /Renderer status reports active character formats/);
   assert.match(markup, /Accepted logo formats:.*PNG, JPEG, WebP, or SVG/);
   assert.match(markup, /select.*Submit render/);
   assert.match(markup, /finished video/);

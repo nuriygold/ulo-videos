@@ -18,14 +18,18 @@ export type AssetUploadPolicy = {
   maximumSizeInBytes: number;
 };
 
-const CHARACTER_CONTENT_TYPES = {
+const CHARACTER_MAXIMUM_SIZE_IN_BYTES = 2 * GIB;
+const CHARACTER_FORMATS = [".blend", ".gltf", ".glb", ".fbx"] as const;
+export type CharacterUploadFormat = typeof CHARACTER_FORMATS[number];
+
+export const CHARACTER_CONTENT_TYPES: Record<CharacterUploadFormat, readonly string[]> = {
   ".blend": ["application/x-blender"],
   ".gltf": ["model/gltf+json"],
   ".glb": ["model/gltf-binary"],
   ".fbx": ["application/octet-stream"],
-} as const;
+};
 
-const CHARACTER_EXTENSIONS = Object.keys(CHARACTER_CONTENT_TYPES) as Array<keyof typeof CHARACTER_CONTENT_TYPES>;
+export const CHARACTER_EXTENSIONS: readonly CharacterUploadFormat[] = CHARACTER_FORMATS;
 
 const UPLOAD_POLICIES: Record<BrowserUploadRole, AssetUploadPolicy> = {
   source_video: {
@@ -34,7 +38,7 @@ const UPLOAD_POLICIES: Record<BrowserUploadRole, AssetUploadPolicy> = {
   },
   character: {
     allowedContentTypes: Object.values(CHARACTER_CONTENT_TYPES).flat(),
-    maximumSizeInBytes: 2 * GIB,
+    maximumSizeInBytes: CHARACTER_MAXIMUM_SIZE_IN_BYTES,
   },
   logo: {
     allowedContentTypes: ["image/png", "image/jpeg", "image/webp", "image/svg+xml"],
@@ -98,6 +102,31 @@ export function characterMimeTypeForFilename(filename: string, contentType: stri
     throw new Error(`character ${characterExtension(filename)} uploads must use ${allowed.join(" or ")}`);
   }
   return normalized;
+}
+
+export function characterUploadPolicyForFormats(formats: readonly string[]): AssetUploadPolicy {
+  const supported = CHARACTER_EXTENSIONS.filter((format) => formats.includes(format));
+  return {
+    allowedContentTypes: supported.flatMap((format) => [...CHARACTER_CONTENT_TYPES[format]]),
+    maximumSizeInBytes: CHARACTER_MAXIMUM_SIZE_IN_BYTES,
+  };
+}
+
+export function characterUploadAcceptForFormats(formats: readonly string[]): string {
+  const supported = CHARACTER_EXTENSIONS.filter((format) => formats.includes(format));
+  return supported.flatMap((format) => [format, ...CHARACTER_CONTENT_TYPES[format]]).join(",");
+}
+
+export function isCharacterUploadFormatSupported(filename: string, formats: readonly string[]): boolean {
+  const extension = CHARACTER_EXTENSIONS.find((item) => filename.toLowerCase().endsWith(item));
+  return Boolean(extension && formats.includes(extension));
+}
+
+export function characterFormatsLabel(formats: readonly string[]): string {
+  const supported = CHARACTER_EXTENSIONS.filter((format) => formats.includes(format));
+  if (supported.length === 0) return "no character formats";
+  if (supported.length === 1) return supported[0];
+  return `${supported.slice(0, -1).join(", ")}, or ${supported.at(-1)}`;
 }
 
 export function uploadPolicyForRole(role: AssetRole): AssetUploadPolicy {

@@ -9,7 +9,7 @@ export type InterruptionDraft = {
 };
 
 import { upload } from "@vercel/blob/client";
-import { buildAssetBlobKey, characterMimeTypeForFilename, type BrowserUploadRole } from "./asset-upload";
+import { buildAssetBlobKey, characterMimeTypeForFilename, isCharacterUploadFormatSupported, type BrowserUploadRole } from "./asset-upload";
 
 export type DemoFileRole = "source_video" | "character" | "logo";
 
@@ -52,8 +52,11 @@ export async function fileForBrowserUpload(file: File, role: BrowserUploadRole, 
   return role === "logo" && isSvgLogo(file) ? rasterize(file) : file;
 }
 
-export async function uploadAsset(file: File, workspaceId: string, projectId: string, role: BrowserUploadRole) {
+export async function uploadAsset(file: File, workspaceId: string, projectId: string, role: BrowserUploadRole, options: { characterFormats?: readonly string[] } = {}) {
   const body = await fileForBrowserUpload(file, role);
+  if (role === "character" && !isCharacterUploadFormatSupported(body.name, options.characterFormats || [])) {
+    throw new Error("The active renderer does not support this character file format.");
+  }
   const assetId = `a_${crypto.randomUUID()}`;
   const contentType = role === "character" ? characterMimeTypeForFilename(body.name, body.type) : body.type;
   const intent = { assetId, workspaceId, projectId, role, filename: body.name };

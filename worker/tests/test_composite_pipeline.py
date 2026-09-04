@@ -170,6 +170,11 @@ class CompositePipelineTests(unittest.TestCase):
             def upload_output(self, job_arg, output): return "asset_rj_123"
 
         def run_command(argv):
+            if argv[0] == "blender":
+                character_dir = Path(argv[argv.index("--output-dir") + 1])
+                character_dir.mkdir(parents=True, exist_ok=True)
+                for frame in range(1, 61):
+                    (character_dir / f"character_{frame:05d}.png").write_bytes(b"png")
             if argv[0] == "ffmpeg":
                 Path(argv[-1]).parent.mkdir(parents=True, exist_ok=True)
                 Path(argv[-1]).write_bytes(b"mp4")
@@ -177,6 +182,42 @@ class CompositePipelineTests(unittest.TestCase):
         result = execute_render_job("rj_123", ControlPlane(), run_command=run_command)
         self.assertEqual(result["status"], "completed")
         self.assertEqual([update["status"] for update in updates], ["preparing", "downloading_assets", "building_scene", "rendering", "encoding", "uploading", "completed"])
+
+    def test_stale_character_frames_are_removed_and_incomplete_blender_output_fails_before_ffmpeg(self):
+        from worker.service import execute_render_job
+
+        job = {
+            "id": "rj_123", "spec_snapshot": {
+                "source": {"video": "https://storage.example/source.mp4"}, "trigger": {"type": "timestamp", "value": 1},
+                "elements": [{"type": "character", "asset": "https://storage.example/character.glb", "position": "foreground_center", "entrance": {"type": "pop_in"}, "performance": {"gesture": "wave"}, "dialogue": {"text": "Hi", "voice": "", "lip_sync": ""}}],
+                "captions": {"enabled": False, "style": "none"}, "branding": {"logo": "https://storage.example/logo.png"},
+                "output": {"width": 1920, "height": 1080, "fps": 30},
+            },
+        }
+        updates = []
+        ffmpeg_ran = False
+
+        class ControlPlane:
+            def get_job(self, job_id): return job
+            def update_job(self, job_id, **fields): updates.append(fields)
+            def download(self, url, destination):
+                Path(destination).parent.mkdir(parents=True, exist_ok=True)
+                Path(destination).write_bytes(b"asset")
+
+        def run_command(argv):
+            nonlocal ffmpeg_ran
+            if argv[0] == "blender":
+                character_dir = Path(argv[argv.index("--output-dir") + 1])
+                self.assertFalse((character_dir / "character_00001.png").exists())
+                (character_dir / "character_00001.png").write_bytes(b"new")
+            if argv[0] == "ffmpeg":
+                ffmpeg_ran = True
+
+        with self.assertRaisesRegex(RuntimeError, "fresh complete character frame sequence"):
+            execute_render_job("rj_123", ControlPlane(), run_command=run_command)
+        self.assertFalse(ffmpeg_ran)
+        self.assertEqual(updates[-1]["error_code"], "render_failed")
+        self.assertIn("fresh complete character frame sequence", updates[-1]["error_message"])
 
     def test_import_validation_failure_is_reported_as_render_failed(self):
         from worker.service import execute_render_job

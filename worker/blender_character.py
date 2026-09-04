@@ -8,6 +8,7 @@ never be silently ignored.
 import argparse
 import json
 import os
+import shutil
 import re
 import struct
 import sys
@@ -162,6 +163,8 @@ def main():
     scene.render.image_settings.file_format = "PNG"
     scene.frame_start = 1
     scene.frame_end = args.frames
+    if os.path.isdir(args.output_dir):
+        shutil.rmtree(args.output_dir)
     os.makedirs(args.output_dir, exist_ok=True)
     scene.render.filepath = os.path.join(args.output_dir, "character_")
 

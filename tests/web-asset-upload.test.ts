@@ -47,6 +47,22 @@ test("upload policies restrict MIME types and provide finite size limits", () =>
   assert.throws(() => uploadPolicyForRole("constructor" as never), /not allowed/i);
 });
 
+test("character browser upload helpers derive accept policy from active renderer formats", async () => {
+  const {
+    characterUploadAcceptForFormats,
+    characterUploadPolicyForFormats,
+    isCharacterUploadFormatSupported,
+  } = await import("../src/web/asset-upload");
+
+  assert.equal(characterUploadAcceptForFormats([]), "");
+  assert.deepEqual(characterUploadPolicyForFormats([]).allowedContentTypes, []);
+  assert.equal(isCharacterUploadFormatSupported("hero.glb", []), false);
+  assert.equal(characterUploadAcceptForFormats([".blend", ".glb"]), ".blend,application/x-blender,.glb,model/gltf-binary");
+  assert.deepEqual(characterUploadPolicyForFormats([".blend", ".glb"]).allowedContentTypes, ["application/x-blender", "model/gltf-binary"]);
+  assert.equal(isCharacterUploadFormatSupported("Hero.GLB", [".blend", ".glb"]), true);
+  assert.equal(isCharacterUploadFormatSupported("Hero.fbx", [".blend", ".glb"]), false);
+});
+
 test("character uploads accept only format-matched Blender, glTF, GLB, and FBX MIME types", () => {
   const characterIntent = { ...intent, role: "character" as const, filename: "Lizard.BLEND" };
   const key = buildAssetBlobKey(characterIntent);

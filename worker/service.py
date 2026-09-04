@@ -1,23 +1,56 @@
 """Deployable authenticated HTTP endpoint for external cloud rendering."""
 
+import glob
 import json
 import os
 import shutil
 import subprocess
 import tempfile
+import time
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from .control_plane import SupabaseBlobControlPlane
 from .http_contract import authenticate_render_request
-from .pipeline import build_composite_plan
+from .pipeline import HOLD_SECONDS, build_composite_plan
 
 
 def _run(argv):
     result = subprocess.run(argv, capture_output=True, text=True, check=False, timeout=900)
     if result.returncode:
         raise RuntimeError(result.stderr[-2000:] or f"{argv[0]} failed")
+
+
+def _character_frame_paths(frame_pattern):
+    pattern = str(frame_pattern).replace("%05d", "*")
+    return sorted(Path(item) for item in glob.glob(pattern))
+
+
+def prepare_character_frame_directory(frame_pattern):
+    frame_dir = Path(frame_pattern).parent
+    if frame_dir.exists():
+        shutil.rmtree(frame_dir)
+    frame_dir.mkdir(parents=True, exist_ok=True)
+    return time.time_ns()
+
+
+def verify_character_frames(frame_pattern, expected_frames, started_at_ns):
+    frames = _character_frame_paths(frame_pattern)
+    expected_names = {str(frame_pattern) % frame for frame in range(1, expected_frames + 1)}
+    actual_names = {str(frame) for frame in frames}
+    missing = sorted(expected_names - actual_names)
+    unexpected = sorted(actual_names - expected_names)
+    if missing or unexpected:
+        details = []
+        if missing:
+            details.append(f"missing {len(missing)} expected character frame(s)")
+        if unexpected:
+            details.append(f"found {len(unexpected)} unexpected character frame(s)")
+        raise RuntimeError("Blender completed without producing a fresh complete character frame sequence: " + "; ".join(details))
+    stale = [frame for frame in frames if not frame.is_file() or frame.stat().st_size <= 0 or frame.stat().st_mtime_ns < started_at_ns]
+    if stale:
+        raise RuntimeError("Blender completed with stale, empty, or invalid character frame(s)")
 
 
 def execute_render_job(job_id, control_plane, *, worker_id=None, run_command=_run):
@@ -42,7 +75,9 @@ def execute_render_job(job_id, control_plane, *, worker_id=None, run_command=_ru
         control_plane.update_job(job_id, status="building_scene", progress=30)
         if plan.rasterize_logo:
             run_command(["rsvg-convert", str(plan.logo_source), "-o", str(plan.logo_image)])
+        frame_start_ns = prepare_character_frame_directory(plan.character_frames)
         run_command(plan.blender_argv)
+        verify_character_frames(plan.character_frames, HOLD_SECONDS * int(job["spec_snapshot"]["output"]["fps"]), frame_start_ns)
         control_plane.update_job(job_id, status="rendering", progress=55)
         control_plane.update_job(job_id, status="encoding", progress=70)
         run_command(plan.ffmpeg_argv)
