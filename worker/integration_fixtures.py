@@ -143,12 +143,12 @@ def avg(path, x0=0.0, y0=0.0, x1=1.0, y1=1.0):
 before_source = avg(paths[0], 0.0, 0.0, 0.08, 1.0)
 during_source = avg(paths[1], 0.0, 0.0, 0.08, 1.0)
 after_source = avg(paths[2], 0.0, 0.0, 0.08, 1.0)
-before_logo = avg(paths[0], 0.72, 0.80, 1.0, 1.0)
-before_caption_band = avg(paths[0], 0.30, 0.75, 0.70, 0.98)
-during_caption_band = avg(paths[1], 0.30, 0.75, 0.70, 0.98)
+before_logo = avg(paths[0], 0.60, 0.20, 0.85, 0.40)
+before_caption_band = avg(paths[0], 0.20, 0.16, 0.80, 0.34)
+during_caption_band = avg(paths[1], 0.20, 0.16, 0.80, 0.34)
 caption_delta = sum(abs(during_caption_band[i] - before_caption_band[i]) for i in range(3))
 # Source is red before the interruption and blue after. During the freeze window
-# it remains near-red; the logo region is yellow/green-biased in the lower-right;
+# it remains near-red; the logo sample uses Blender's bottom-left image origin;
 # the caption band changes only during the interruption window.
 if not (before_source[0] > before_source[2] + 80):
     raise SystemExit(f"before frame is not red/source-start dominated: {before_source}")
