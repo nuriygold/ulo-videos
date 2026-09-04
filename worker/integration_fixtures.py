@@ -1,0 +1,328 @@
+"""CI-only Blender/FFmpeg integration fixtures for the external worker.
+
+The functions in this module are intentionally standard-library only so the
+GitHub Actions job can execute them inside the pinned worker image without
+adding runtime dependencies. Normal unit tests do not import or run this file.
+"""
+
+import argparse
+import base64
+import json
+import shutil
+import subprocess
+import tempfile
+from pathlib import Path
+
+from worker.pipeline import build_composite_plan
+from worker.service import executable_status
+
+PNG_1X1_TRANSPARENT = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADElEQVR42mNk+M/wHwAF/gL+24dD2QAAAABJRU5ErkJggg=="
+)
+
+BLENDER_SCENE_SCRIPT = r'''
+import math
+import sys
+from pathlib import Path
+
+import bpy
+argv = sys.argv[sys.argv.index("--") + 1:]
+out_dir = Path(argv[argv.index("--out-dir") + 1])
+case = argv[argv.index("--case") + 1]
+out_dir.mkdir(parents=True, exist_ok=True)
+
+bpy.ops.wm.read_factory_settings(use_empty=True)
+
+material = bpy.data.materials.new("fixture_material")
+material.use_nodes = True
+principled = material.node_tree.nodes.get("Principled BSDF")
+if principled:
+    principled.inputs["Base Color"].default_value = (0.0, 0.8, 0.2, 1.0)
+    principled.inputs["Alpha"].default_value = 1.0
+
+if case != "missing_armature":
+    bpy.ops.object.armature_add(enter_editmode=False, location=(0, 0, 0))
+    armature = bpy.context.object
+    armature.name = "FixtureArmature"
+else:
+    armature = None
+
+bpy.ops.mesh.primitive_cube_add(size=1.5, location=(0, 0, 0.4))
+mesh = bpy.context.object
+mesh.name = "FixtureCharacter"
+mesh.data.materials.append(material)
+if armature:
+    mesh.parent = armature
+
+if case != "missing_camera":
+    bpy.ops.object.camera_add(location=(0, -6, 3), rotation=(math.radians(60), 0, 0))
+    bpy.context.scene.camera = bpy.context.object
+
+if case != "missing_gesture":
+    action = bpy.data.actions.new("wave")
+    if armature:
+        armature.animation_data_create()
+        armature.animation_data.action = action
+        armature.rotation_euler[2] = 0
+        armature.keyframe_insert(data_path="rotation_euler", frame=1)
+        armature.rotation_euler[2] = 0.4
+        armature.keyframe_insert(data_path="rotation_euler", frame=12)
+    if case == "ambiguous_gesture":
+        bpy.data.actions.new("WAVE")
+
+bpy.context.scene.frame_start = 1
+bpy.context.scene.frame_end = 12
+bpy.context.scene.render.engine = "BLENDER_EEVEE_NEXT"
+bpy.context.scene.render.resolution_x = 128
+bpy.context.scene.render.resolution_y = 128
+bpy.ops.wm.save_as_mainfile(filepath=str(out_dir / f"{case}.blend"))
+'''
+
+DISCOVER_ACTIONS_SCRIPT = r'''
+import json
+import sys
+from pathlib import Path
+
+import bpy
+
+argv = sys.argv[sys.argv.index("--") + 1:]
+asset = Path(argv[0])
+fmt = argv[1]
+bpy.ops.wm.read_factory_settings(use_empty=True)
+if fmt in {".gltf", ".glb"}:
+    bpy.ops.import_scene.gltf(filepath=str(asset))
+elif fmt == ".fbx":
+    bpy.ops.import_scene.fbx(filepath=str(asset))
+else:
+    bpy.ops.wm.open_mainfile(filepath=str(asset))
+print("ULO_ACTIONS:" + json.dumps([action.name for action in bpy.data.actions]))
+'''
+
+SAMPLE_SCRIPT = r'''
+import json
+import sys
+from pathlib import Path
+
+import bpy
+
+paths = [Path(item) for item in sys.argv[sys.argv.index("--") + 1:sys.argv.index("--") + 4]]
+
+def avg(path, x0=0.0, y0=0.0, x1=1.0, y1=1.0):
+    image = bpy.data.images.load(str(path))
+    try:
+        values = list(image.pixels)
+        width, height = image.size
+        left = max(0, int(width * x0))
+        right = min(width, max(left + 1, int(width * x1)))
+        bottom = max(0, int(height * y0))
+        top = min(height, max(bottom + 1, int(height * y1)))
+        totals = [0.0, 0.0, 0.0]
+        count = 0
+        for y in range(bottom, top):
+            for x in range(left, right):
+                offset = (y * width + x) * 4
+                for channel in range(3):
+                    totals[channel] += values[offset + channel]
+                count += 1
+        return tuple(value / count * 255 for value in totals)
+    finally:
+        bpy.data.images.remove(image)
+
+before_source = avg(paths[0], 0.0, 0.0, 0.08, 1.0)
+during_source = avg(paths[1], 0.0, 0.0, 0.08, 1.0)
+after_source = avg(paths[2], 0.0, 0.0, 0.08, 1.0)
+before_logo = avg(paths[0], 0.35, 0.35, 0.75, 0.65)
+before_caption_band = avg(paths[0], 0.25, 0.48, 0.75, 0.82)
+during_caption_band = avg(paths[1], 0.25, 0.48, 0.75, 0.82)
+caption_delta = sum(abs(during_caption_band[i] - before_caption_band[i]) for i in range(3))
+# Source is red before the interruption and blue after. During the freeze window
+# it remains near-red; the logo region is yellow/green-biased; the caption band
+# changes only during the interruption window.
+if not (before_source[0] > before_source[2] + 80):
+    raise SystemExit(f"before frame is not red/source-start dominated: {before_source}")
+if not (during_source[0] > during_source[2] + 40):
+    raise SystemExit(f"during frame did not preserve freeze frame before resume: {during_source}")
+if not (after_source[2] > after_source[0] + 70):
+    raise SystemExit(f"after frame is not blue/source-resume dominated: {after_source}")
+if not (before_logo[1] > before_source[1] + 50):
+    raise SystemExit(f"logo sample is not visibly green/yellow-biased: source={before_source} logo={before_logo}")
+if not (caption_delta > 15):
+    raise SystemExit(f"caption timing band did not change during interruption: before={before_caption_band} during={during_caption_band}")
+print(json.dumps({"before_source": before_source, "during_source": during_source, "after_source": after_source, "before_logo": before_logo, "caption_delta": caption_delta}))
+'''
+
+
+def run(argv, *, cwd=None, timeout=120):
+    printable = " ".join(str(item) for item in argv)
+    print(f"+ {printable}", flush=True)
+    return subprocess.run(argv, cwd=cwd, check=True, text=True, capture_output=True, timeout=timeout)
+
+
+def require_health():
+    status = executable_status()
+    print(json.dumps(status, sort_keys=True))
+    if status != {"ok": True, "ffmpeg": True, "blender": True, "rsvg_convert": True}:
+        raise SystemExit(f"worker media health check failed: {status}")
+
+
+def render_demo_asset(repo_root, workdir, demo_asset):
+    output_dir = workdir / "demo-render"
+    output_dir.mkdir(parents=True)
+    run([
+        "blender", "-b", str(demo_asset), "-P", str(repo_root / "worker" / "blender_character.py"), "--",
+        "--output-dir", str(output_dir), "--width", "128", "--height", "128", "--fps", "12",
+        "--frames", "3", "--position", "foreground_center", "--entrance", "pop_in", "--gesture", "shrug_and_point",
+    ], timeout=300)
+    if not sorted(output_dir.glob("character_*.png")):
+        raise SystemExit("demo Blender asset render did not produce character PNG frames")
+
+
+def write_composite_inputs(workdir):
+    input_dir = workdir / "input"
+    character_dir = workdir / "character"
+    input_dir.mkdir()
+    character_dir.mkdir()
+    source = input_dir / "source.mp4"
+    logo_svg = input_dir / "logo.svg"
+    logo_png = input_dir / "logo.png"
+    run([
+        "ffmpeg", "-y",
+        "-f", "lavfi", "-i", "color=c=red:size=160x120:rate=10:d=1.2",
+        "-f", "lavfi", "-i", "color=c=blue:size=160x120:rate=10:d=1.8",
+        "-filter_complex", "[0:v][1:v]concat=n=2:v=1:a=0[out]",
+        "-map", "[out]", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(source),
+    ])
+    logo_svg.write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="80" height="40"><rect width="80" height="40" fill="yellow"/></svg>',
+        encoding="utf-8",
+    )
+    run(["rsvg-convert", str(logo_svg), "-o", str(logo_png)])
+    for frame in range(1, 21):
+        (character_dir / f"character_{frame:05d}.png").write_bytes(PNG_1X1_TRANSPARENT)
+
+
+def verify_composite(workdir):
+    write_composite_inputs(workdir)
+    scene = {
+        "source": {"video": "https://storage.example/source.mp4"},
+        "trigger": {"type": "timestamp", "value": 1},
+        "elements": [{
+            "type": "character", "asset": "https://storage.example/character.blend",
+            "position": "foreground_center", "entrance": {"type": "pop_in"},
+            "performance": {"gesture": "wave"}, "dialogue": {"text": "VERIFY", "voice": "", "lip_sync": ""},
+        }],
+        "captions": {"enabled": True, "style": "lower_third"},
+        "branding": {"logo": "https://storage.example/logo.svg"},
+        "output": {"width": 160, "height": 120, "fps": 10},
+    }
+    plan = build_composite_plan(scene, workdir)
+    run(plan.ffmpeg_argv, timeout=180)
+    duration = float(run([
+        "ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", plan.output,
+    ]).stdout.strip())
+    if not 4.8 <= duration <= 5.4:
+        raise SystemExit(f"unexpected composite duration, expected source + two-second hold: {duration}")
+    frames = workdir / "sampled-frames"
+    frames.mkdir()
+    for name, timestamp in (("before", "0.5"), ("during", "1.5"), ("after", "3.6")):
+        run(["ffmpeg", "-y", "-ss", timestamp, "-i", plan.output, "-frames:v", "1", str(frames / f"{name}.png")])
+    run(["blender", "--background", "--python-expr", SAMPLE_SCRIPT, "--", str(frames / "before.png"), str(frames / "during.png"), str(frames / "after.png")])
+
+
+def generate_blender_case(repo_root, workdir, case):
+    run(["blender", "--background", "--python-expr", BLENDER_SCENE_SCRIPT, "--", "--out-dir", str(workdir), "--case", case], timeout=180)
+
+
+def export_variants(workdir):
+    source = workdir / "valid.blend"
+    for extension, operator in (
+        ("gltf", "bpy.ops.export_scene.gltf(filepath=str(out), export_format='GLTF_EMBEDDED')"),
+        ("glb", "bpy.ops.export_scene.gltf(filepath=str(out), export_format='GLB')"),
+        ("fbx", "bpy.ops.export_scene.fbx(filepath=str(out), embed_textures=True, path_mode='COPY')"),
+    ):
+        script = (
+            "import sys\nfrom pathlib import Path\nimport bpy\n"
+            "src = Path(sys.argv[sys.argv.index('--') + 1])\n"
+            "out = Path(sys.argv[sys.argv.index('--') + 2])\n"
+            "bpy.ops.wm.open_mainfile(filepath=str(src))\n"
+            f"{operator}\n"
+        )
+        run(["blender", "--background", "--python-expr", script, "--", str(source), str(workdir / f"valid.{extension}")], timeout=180)
+
+
+def discover_gesture(asset, fmt):
+    result = run(["blender", "--background", "--python-expr", DISCOVER_ACTIONS_SCRIPT, "--", str(asset), fmt], timeout=180)
+    for line in result.stdout.splitlines():
+        if line.startswith("ULO_ACTIONS:"):
+            actions = json.loads(line.removeprefix("ULO_ACTIONS:"))
+            if actions:
+                return actions[0]
+    return "wave"
+
+
+def run_character_renderer(repo_root, asset, fmt, workdir, *, gesture="wave", expect_success=True, expected_error=None):
+    output = workdir / f"render-{asset.stem}-{fmt.strip('.')}-{gesture}"
+    output.mkdir(exist_ok=True)
+    argv = ["blender", "-b"]
+    if fmt == ".blend":
+        argv.append(str(asset))
+    argv.extend(["-P", str(repo_root / "worker" / "blender_character.py"), "--"])
+    if fmt != ".blend":
+        argv.extend(["--character", str(asset), "--character-format", fmt, "--imported-blend", str(workdir / f"{asset.stem}-imported.blend")])
+    argv.extend(["--output-dir", str(output), "--width", "96", "--height", "96", "--fps", "12", "--frames", "2", "--position", "foreground_center", "--entrance", "pop_in", "--gesture", gesture])
+    result = subprocess.run(argv, text=True, capture_output=True, timeout=240)
+    combined = result.stdout + result.stderr
+    print(f"+ {' '.join(str(item) for item in argv)}", flush=True)
+    print(combined[-2000:], flush=True)
+    if expect_success:
+        if result.returncode != 0:
+            raise SystemExit(f"expected success for {asset.name}, got {result.returncode}")
+        if not sorted(output.glob("character_*.png")):
+            raise SystemExit(f"{asset.name} render produced no PNG frames")
+    else:
+        if result.returncode == 0:
+            raise SystemExit(f"expected failure for {asset.name}")
+        if expected_error and expected_error not in combined:
+            raise SystemExit(f"expected error {expected_error!r} in {asset.name} output")
+
+
+def verify_character_fixtures(repo_root, workdir):
+    for case in ("valid", "missing_camera", "missing_armature", "missing_gesture", "ambiguous_gesture"):
+        generate_blender_case(repo_root, workdir, case)
+    export_variants(workdir)
+    for fmt in (".blend", ".gltf", ".glb", ".fbx"):
+        asset = workdir / f"valid{fmt}"
+        run_character_renderer(repo_root, asset, fmt, workdir, gesture=discover_gesture(asset, fmt))
+    run_character_renderer(repo_root, workdir / "missing_camera.blend", ".blend", workdir, expect_success=False, expected_error="active camera")
+    run_character_renderer(repo_root, workdir / "missing_armature.blend", ".blend", workdir, expect_success=False, expected_error="armature")
+    run_character_renderer(repo_root, workdir / "missing_gesture.blend", ".blend", workdir, expect_success=False, expected_error="requested gesture action")
+    run_character_renderer(repo_root, workdir / "ambiguous_gesture.blend", ".blend", workdir, expect_success=False, expected_error="matches multiple actions")
+    missing_sidecar = workdir / "missing-sidecar.gltf"
+    missing_sidecar.write_text(json.dumps({"asset": {"version": "2.0"}, "buffers": [{"uri": "missing.bin", "byteLength": 4}]}), encoding="utf-8")
+    run_character_renderer(repo_root, missing_sidecar, ".gltf", workdir, expect_success=False, expected_error="external resources")
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--repo-root", default=Path(__file__).resolve().parents[1])
+    parser.add_argument("--demo-asset")
+    parser.add_argument("--keep-workdir", action="store_true")
+    args = parser.parse_args()
+    repo_root = Path(args.repo_root).resolve()
+    demo_asset = Path(args.demo_asset).resolve() if args.demo_asset else repo_root / "public" / "demo" / "demo-character.blend"
+    workdir = Path(tempfile.mkdtemp(prefix="ulo-worker-integration-"))
+    try:
+        require_health()
+        render_demo_asset(repo_root, workdir / "demo", demo_asset)
+        verify_composite(workdir / "composite")
+        verify_character_fixtures(repo_root, workdir / "characters")
+        print(f"worker integration fixtures passed in {workdir}")
+    finally:
+        if args.keep_workdir:
+            print(f"kept integration workdir: {workdir}")
+        else:
+            shutil.rmtree(workdir, ignore_errors=True)
+
+
+if __name__ == "__main__":
+    main()

@@ -103,6 +103,33 @@ class HttpContractTests(unittest.TestCase):
         self.assertIn("worker/.env", dockerignore)
         self.assertIn(".env", dockerignore)
 
+    def test_worker_integration_workflow_runs_amd64_image_and_fixture_script(self):
+        workflow = (Path(__file__).parents[2] / ".github" / "workflows" / "worker-integration.yml").read_text()
+        self.assertIn("ubuntu-24.04", workflow)
+        self.assertIn("platforms: linux/amd64", workflow)
+        self.assertIn("--platform linux/amd64", workflow)
+        self.assertIn("worker.integration_fixtures", workflow)
+
+    def test_integration_fixture_script_covers_render_and_character_cases(self):
+        script = (Path(__file__).parents[1] / "integration_fixtures.py").read_text()
+        for expected in (
+            "require_health",
+            "render_demo_asset",
+            "verify_composite",
+            "verify_character_fixtures",
+            '".blend", ".gltf", ".glb", ".fbx"',
+            "missing_camera",
+            "missing_armature",
+            "missing_gesture",
+            "ambiguous_gesture",
+            "missing-sidecar.gltf",
+            "ffprobe",
+            "sampled-frames",
+            "demo-character.blend",
+            "DISCOVER_ACTIONS_SCRIPT",
+        ):
+            self.assertIn(expected, script)
+
 
 if __name__ == "__main__":
     unittest.main()

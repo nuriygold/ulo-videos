@@ -1,4 +1,5 @@
 import base64
+import os
 import shutil
 import subprocess
 import tempfile
@@ -256,7 +257,7 @@ class CompositePipelineTests(unittest.TestCase):
         self.assertIn("def fade_materials", script)
         self.assertIn("keyframe_insert(data_path=\"default_value\"", script)
 
-    @unittest.skipUnless(shutil.which("ffmpeg"), "requires FFmpeg")
+    @unittest.skipUnless(os.environ.get("ULO_RUN_FFMPEG_INTEGRATION") == "1" and shutil.which("ffmpeg"), "requires ULO_RUN_FFMPEG_INTEGRATION=1 and FFmpeg")
     def test_actual_ffmpeg_assembly_adds_only_the_two_second_freeze(self):
         from worker.pipeline import build_composite_plan
 
