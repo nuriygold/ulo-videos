@@ -41,6 +41,7 @@ class CompositePipelineTests(unittest.TestCase):
         filters = plan.ffmpeg_argv[plan.ffmpeg_argv.index("-filter_complex") + 1]
         self.assertIn("overlay=W-w-48:H-h-48", filters)
         self.assertIn("[freeze_source]trim=start=7.4:end=7.433333", filters)
+        self.assertIn("loop=loop=59:size=1:start=0,setpts=N/30/TB[hold]", filters)
         self.assertNotIn("[before]tpad", filters)
         self.assertIn("[before][hold][after]concat=n=3:v=1:a=0[assembled]", filters)
         self.assertIn("[assembled]scale=1920:1080,fps=30[scene]", filters)

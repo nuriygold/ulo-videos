@@ -137,7 +137,7 @@ def build_composite_plan(scene: dict, workdir: Union[str, Path]) -> CompositePla
     after = f"[after_source]trim=start={trigger},setpts=PTS-STARTPTS[after]"
     hold = (
         f"[freeze_source]trim=start={_number(float(trigger))}:end={_number(float(trigger) + (1 / fps))},"
-        f"setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration={HOLD_SECONDS}[hold]"
+        f"setpts=PTS-STARTPTS,loop=loop={max(hold_frames - 1, 0)}:size=1:start=0,setpts=N/{fps}/TB[hold]"
     )
     caption_filter = ""
     if caption_style != "none":
