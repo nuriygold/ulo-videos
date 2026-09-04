@@ -52,6 +52,14 @@ test("buildInterruptionScene maps editor state to the deterministic Scene v1 con
   });
 });
 
+test("buildInterruptionScene preserves voice and lip-sync references as shot metadata", () => {
+  assert.deepEqual(buildInterruptionScene({ ...draft, voice: "local_voice_01", lipSync: "rhubarb" }).elements[0].dialogue, {
+    text: "Wait — there is a clearer way.",
+    voice: "local_voice_01",
+    lip_sync: "rhubarb",
+  });
+});
+
 test("buildInterruptionScene supports fallback scenes without character assets", () => {
   assert.deepEqual(buildInterruptionScene({ ...draft, characterAsset: "", voice: "legacy-voice", lipSync: "legacy-lip-sync" }).elements, [{
     id: "spokesperson",
