@@ -238,11 +238,11 @@ def verify_composite(workdir):
         "elements": [{
             "type": "character", "asset": "https://storage.example/character.blend",
             "position": "foreground_center", "entrance": {"type": "pop_in"},
-            "performance": {"gesture": "wave"}, "dialogue": {"text": "VERIFY", "voice": "", "lip_sync": ""},
+            "performance": {"gesture": "wave"}, "dialogue": {"text": "VERIFY VERIFY VERIFY", "voice": "", "lip_sync": ""},
         }],
         "captions": {"enabled": True, "style": "lower_third"},
         "branding": {"logo": "https://storage.example/logo.svg"},
-        "output": {"width": 320, "height": 240, "fps": 10},
+        "output": {"width": 640, "height": 360, "fps": 10},
     }
     plan = build_composite_plan(scene, workdir)
     run(plan.ffmpeg_argv, timeout=180)
