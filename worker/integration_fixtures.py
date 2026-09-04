@@ -180,8 +180,8 @@ def render_demo_asset(repo_root, workdir, demo_asset):
 def write_composite_inputs(workdir):
     input_dir = workdir / "input"
     character_dir = workdir / "character"
-    input_dir.mkdir()
-    character_dir.mkdir()
+    input_dir.mkdir(parents=True)
+    character_dir.mkdir(parents=True)
     source = input_dir / "source.mp4"
     logo_svg = input_dir / "logo.svg"
     logo_png = input_dir / "logo.png"
