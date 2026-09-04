@@ -18,5 +18,7 @@ test("workspace explains the complete interrupted-video workflow", () => {
   assert.match(markup, /finished video/);
   assert.match(markup, /Vercel fallback applies freeze\/resume, logo, and captions/);
   assert.match(markup, /Character, source audio, voice, and lip-sync are unavailable/);
-  assert.match(markup, /Voice reference \(unavailable\)/);
+  assert.match(markup, /Voice reference/);
+  assert.doesNotMatch(markup, /Voice reference \(unavailable\)/);
+  assert.doesNotMatch(markup, /Lip-sync reference \(unavailable\)/);
 });
