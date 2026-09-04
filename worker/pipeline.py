@@ -153,7 +153,7 @@ def build_composite_plan(scene: dict, workdir: Union[str, Path]) -> CompositePla
         f"[2:v]setpts=PTS+{trigger}/TB[character]",
         f"[scene][character]overlay=x={x}:y={y}:format=auto:eof_action=pass:repeatlast=0[with_character]",
         "[1:v]scale=240:-1[logo]",
-        f"[with_character][logo]overlay=W-w-48:H-h-48:shortest=1{caption_filter}[out]",
+        f"[with_character][logo]overlay=W-w-48:H-h-48:eof_action=pass{caption_filter}[out]",
     ])
     ffmpeg_argv = [
         "ffmpeg", "-y", "-i", str(source), "-loop", "1", "-i", str(logo_image),

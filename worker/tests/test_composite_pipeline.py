@@ -48,7 +48,8 @@ class CompositePipelineTests(unittest.TestCase):
         self.assertIn("eof_action=pass", filters)
         self.assertIn("drawtext=text='A clearer way.'", filters)
         self.assertIn("enable='between(t,7.4,9.4)'", filters)
-        self.assertIn("shortest=1", filters)
+        self.assertIn("overlay=W-w-48:H-h-48:eof_action=pass", filters)
+        self.assertNotIn("shortest=1", filters)
         self.assertNotIn("-shortest", plan.ffmpeg_argv)
         self.assertTrue(plan.output.endswith("/tmp/render-job/output.mp4"))
 
