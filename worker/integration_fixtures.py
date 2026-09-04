@@ -242,7 +242,7 @@ def verify_composite(workdir):
         }],
         "captions": {"enabled": True, "style": "lower_third"},
         "branding": {"logo": "https://storage.example/logo.svg"},
-        "output": {"width": 160, "height": 120, "fps": 10},
+        "output": {"width": 320, "height": 240, "fps": 10},
     }
     plan = build_composite_plan(scene, workdir)
     run(plan.ffmpeg_argv, timeout=180)
