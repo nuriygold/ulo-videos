@@ -24,3 +24,13 @@ test("queue rejection diagnostics preserve response body but redact bearer token
   assert.equal(queueRejectionMessage(502, "dispatcher unavailable for rj_123"), "render queue rejected the job (502): dispatcher unavailable for rj_123");
   assert.equal(queueRejectionMessage(401, "Authorization: Bearer super-secret-token"), "render queue rejected the job (401): Authorization: Bearer [redacted]");
 });
+
+test("queue rejection diagnostics extract and bound verbose JSON worker errors", () => {
+  const ffmpegError = `{"error":"ffmpeg version 7.0\\nbuilt with gcc 8\\nconfiguration: --enable-gpl\\n${"libavcodec 61. 3.100\\n".repeat(80)}output.mp4: Invalid argument"}`;
+  const message = queueRejectionMessage(502, ffmpegError);
+
+  assert.match(message, /render queue rejected the job \(502\):/);
+  assert.match(message, /output\.mp4: Invalid argument$/);
+  assert.doesNotMatch(message, /ffmpeg banner|configuration:/);
+  assert.ok(message.length <= 560);
+});
