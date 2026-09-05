@@ -5,6 +5,7 @@ import os
 import shutil
 from pathlib import Path
 from urllib.parse import quote
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 
@@ -19,8 +20,16 @@ class SupabaseBlobControlPlane:
         headers = {"apikey": self.service_role_key, "Authorization": f"Bearer {self.service_role_key}"}
         if body is not None:
             headers.update({"Content-Type": "application/json", "Prefer": prefer})
-        with urlopen(Request(f"{self.supabase_url}/rest/v1/{path}", method=method, data=body, headers=headers), timeout=45) as response:
-            raw = response.read()
+        try:
+            with urlopen(Request(f"{self.supabase_url}/rest/v1/{path}", method=method, data=body, headers=headers), timeout=45) as response:
+                raw = response.read()
+        except HTTPError as error:
+            try:
+                detail = error.read().decode("utf-8", errors="replace").strip()
+            except OSError:
+                detail = ""
+            suffix = f": {detail[:1000]}" if detail else ""
+            raise RuntimeError(f"Supabase REST request failed ({error.code}){suffix}") from error
         return json.loads(raw.decode("utf-8")) if raw else None
 
     def get_job(self, job_id):

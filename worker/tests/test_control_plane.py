@@ -3,10 +3,31 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from urllib.error import HTTPError
 from unittest.mock import patch
 
 
 class ControlPlaneTests(unittest.TestCase):
+    def test_rest_http_errors_include_the_safe_upstream_response_body(self):
+        from worker.control_plane import SupabaseBlobControlPlane
+
+        error = HTTPError(
+            "https://supabase.example/rest/v1/render_jobs",
+            400,
+            "Bad Request",
+            {},
+            io.BytesIO(b'{"message":"worker_id column is missing"}'),
+        )
+
+        class ControlPlane(SupabaseBlobControlPlane):
+            def __init__(self):
+                self.supabase_url = "https://supabase.example"
+                self.service_role_key = "service-role"
+
+        with patch("worker.control_plane.urlopen", side_effect=error):
+            with self.assertRaisesRegex(RuntimeError, r"Supabase REST request failed \(400\): \{\"message\":\"worker_id column is missing\"\}"):
+                ControlPlane()._request("render_jobs?select=*")
+
     def test_update_job_detects_empty_patch_result(self):
         from worker.control_plane import SupabaseBlobControlPlane
 
