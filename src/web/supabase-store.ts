@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { AssetRecord, ControlPlaneStore, ProjectRecord, ShotRecord } from "./integrations";
+import type { RenderStage } from "./contracts";
 import { WorkspaceOwnershipError } from "./request-errors";
 
 type Json = Record<string, unknown>;
@@ -175,9 +176,23 @@ export class SupabaseControlPlaneStore implements ControlPlaneStore {
     return data;
   }
 
-  async updateRenderJob(id: string, update: Json) {
-    const { error } = await this.client.from("render_jobs").update(update).eq("id", id);
+  async updateRenderJob(id: string, update: Json, expectedStatus?: RenderStage) {
+    let query = this.client.from("render_jobs").update(update).eq("id", id);
+    if (expectedStatus) query = query.eq("status", expectedStatus);
+    const { error } = await query;
     if (error) throw error;
+  }
+
+  async transitionRenderJob(id: string, expectedStatus: RenderStage, update: Json) {
+    const { data, error } = await this.client
+      .from("render_jobs")
+      .update(update)
+      .eq("id", id)
+      .eq("status", expectedStatus)
+      .select("id")
+      .maybeSingle();
+    if (error) throw error;
+    return Boolean(data);
   }
 }
 

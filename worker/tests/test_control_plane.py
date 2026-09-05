@@ -8,6 +8,46 @@ from unittest.mock import patch
 
 
 class ControlPlaneTests(unittest.TestCase):
+    def test_claim_job_only_updates_a_queued_unleased_job(self):
+        from worker.control_plane import SupabaseBlobControlPlane
+
+        class ControlPlane(SupabaseBlobControlPlane):
+            def __init__(self):
+                self.calls = []
+
+            def _request(self, path, *, method="GET", payload=None, prefer=None):
+                self.calls.append((path, method, payload, prefer))
+                return [{"id": "rj_123", "status": "preparing", "worker_id": "worker-a"}]
+
+        control = ControlPlane()
+        claimed = control.claim_job("rj_123", "worker-a", now="2026-09-05T12:00:00+00:00", lease_seconds=900)
+
+        self.assertEqual(claimed["status"], "preparing")
+        path, method, payload, prefer = control.calls[0]
+        self.assertIn("status=eq.queued", path)
+        self.assertIn("worker_id", payload)
+        self.assertEqual(method, "PATCH")
+        self.assertEqual(prefer, "return=representation")
+
+    def test_transition_job_returns_false_when_the_expected_owner_or_status_is_stale(self):
+        from worker.control_plane import SupabaseBlobControlPlane
+
+        class ControlPlane(SupabaseBlobControlPlane):
+            def __init__(self):
+                self.calls = []
+
+            def _request(self, path, *, method="GET", payload=None, prefer=None):
+                self.calls.append((path, method, payload, prefer))
+                return []
+
+        control = ControlPlane()
+        self.assertFalse(control.transition_job("rj_123", "worker-a", "rendering", "encoding", progress=70))
+        path, method, payload, _ = control.calls[0]
+        self.assertIn("status=eq.rendering", path)
+        self.assertIn("worker_id=eq.worker-a", path)
+        self.assertEqual(method, "PATCH")
+        self.assertEqual(payload, {"status": "encoding", "progress": 70})
+
     def test_rest_http_errors_include_the_safe_upstream_response_body(self):
         from worker.control_plane import SupabaseBlobControlPlane
 

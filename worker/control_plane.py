@@ -3,6 +3,7 @@
 import json
 import os
 import shutil
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote
 from urllib.error import HTTPError
@@ -42,6 +43,42 @@ class SupabaseBlobControlPlane:
         rows = self._request(f"render_jobs?id=eq.{quote(job_id, safe='')}", method="PATCH", payload=fields)
         if rows == []:
             raise ValueError("render job not found during update")
+
+    def claim_job(self, job_id, worker_id, *, now=None, lease_seconds=1800):
+        if not worker_id:
+            raise ValueError("worker_id is required to claim a render job")
+        current = datetime.fromisoformat(now) if isinstance(now, str) else (now or datetime.now(timezone.utc))
+        if current.tzinfo is None:
+            current = current.replace(tzinfo=timezone.utc)
+        now_value = current.isoformat()
+        lease_value = (current + timedelta(seconds=lease_seconds)).isoformat()
+        path = (
+            f"render_jobs?id=eq.{quote(job_id, safe='')}"
+            f"&status=eq.queued&or=(lease_expires_at.is.null,lease_expires_at.lt.{quote(now_value, safe='')})"
+        )
+        rows = self._request(
+            path,
+            method="PATCH",
+            payload={
+                "status": "preparing",
+                "progress": 5,
+                "worker_id": worker_id,
+                "started_at": now_value,
+                "lease_expires_at": lease_value,
+            },
+            prefer="return=representation",
+        )
+        return rows[0] if rows else None
+
+    def transition_job(self, job_id, worker_id, expected_status, status, **fields):
+        payload = {"status": status, **fields}
+        path = (
+            f"render_jobs?id=eq.{quote(job_id, safe='')}"
+            f"&status=eq.{quote(expected_status, safe='')}"
+            f"&worker_id=eq.{quote(worker_id, safe='')}"
+        )
+        rows = self._request(path, method="PATCH", payload=payload, prefer="return=representation")
+        return bool(rows)
 
     def download(self, source_url, destination):
         target = Path(destination)

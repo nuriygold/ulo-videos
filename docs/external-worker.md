@@ -80,6 +80,24 @@ queued → preparing → downloading_assets → building_scene → rendering
 → encoding → uploading → completed | failed
 ```
 
+Every status update must include the state the worker observed immediately
+before the update. The control plane applies the update only when that state
+still matches, so stale or duplicate callbacks are rejected with `409`:
+
+```json
+{
+  "expected_status": "building_scene",
+  "status": "rendering",
+  "progress": 55
+}
+```
+
+Workers must first claim a queued job. The claim atomically records
+`worker_id`, `started_at`, and a short `lease_expires_at`; a second worker
+cannot claim the same queued job while its lease is active. A worker that loses
+its claim must stop and treat the job as stale rather than continuing to write
+stages.
+
 The worker should delete its temporary job directory on success and failure.
 It must not mark a job complete if the selected character, captions, or
 branding values were ignored. The current image supports text captions, not

@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 import threading
 import time
+from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -15,6 +16,10 @@ from pathlib import Path
 from .control_plane import SupabaseBlobControlPlane
 from .http_contract import authenticate_render_request
 from .pipeline import HOLD_SECONDS, build_composite_plan
+
+
+class JobClaimConflict(RuntimeError):
+    """The job was already claimed or no longer accepts worker execution."""
 
 
 def _run(argv):
@@ -64,34 +69,58 @@ def execute_render_job(job_id, control_plane, *, worker_id=None, run_command=_ru
             "progress": 100,
             "outputAssetId": job.get("output_asset_id"),
         }
-    workdir = Path(tempfile.mkdtemp(prefix=f"ulo-{job_id}-"))
     worker_id = worker_id or os.environ.get("WORKER_ID", "blender-ffmpeg-worker")
+    claimed = control_plane.claim_job(job_id, worker_id)
+    if claimed is None:
+        raise JobClaimConflict(f"render job {job_id} is already claimed or not queued")
+    job = claimed
+    current_status = "preparing"
+    workdir = Path(tempfile.mkdtemp(prefix=f"ulo-{job_id}-"))
+
+    def transition(status, progress, **fields):
+        nonlocal current_status
+        if not control_plane.transition_job(job_id, worker_id, current_status, status, progress=progress, **fields):
+            raise JobClaimConflict(f"render job {job_id} state changed during {current_status} -> {status}")
+        current_status = status
+
     try:
-        control_plane.update_job(job_id, status="preparing", progress=5, worker_id=worker_id)
         plan = build_composite_plan(job["spec_snapshot"], workdir)
-        control_plane.update_job(job_id, status="downloading_assets", progress=15)
+        transition("downloading_assets", 15)
         control_plane.download(plan.source_url, plan.source)
         control_plane.download(plan.character_url, plan.character)
         control_plane.download(plan.logo_url, plan.logo_source)
-        control_plane.update_job(job_id, status="building_scene", progress=30)
+        transition("building_scene", 30)
         if plan.rasterize_logo:
             run_command(["rsvg-convert", str(plan.logo_source), "-o", str(plan.logo_image)])
         frame_start_ns = prepare_character_frame_directory(plan.character_frames)
         run_command(plan.blender_argv)
         verify_character_frames(plan.character_frames, HOLD_SECONDS * int(job["spec_snapshot"]["output"]["fps"]), frame_start_ns)
-        control_plane.update_job(job_id, status="rendering", progress=55)
-        control_plane.update_job(job_id, status="encoding", progress=70)
+        transition("rendering", 55)
+        transition("encoding", 70)
         run_command(plan.ffmpeg_argv)
         if not Path(plan.output).is_file():
             raise RuntimeError("FFmpeg completed without producing output.mp4")
-        control_plane.update_job(job_id, status="uploading", progress=85)
+        transition("uploading", 85)
         output_asset_id = control_plane.upload_output(job, plan.output)
-        completed = {"status": "completed", "progress": 100, "output_asset_id": output_asset_id}
-        control_plane.update_job(job_id, **completed)
+        completed = {"status": "completed", "progress": 100, "output_asset_id": output_asset_id, "completed_at": datetime.now(timezone.utc).isoformat(), "lease_expires_at": None}
+        transition("completed", 100, output_asset_id=output_asset_id, completed_at=completed["completed_at"], lease_expires_at=None)
         return {"jobId": job_id, "outputAssetId": output_asset_id, **completed}
     except Exception as error:
-        failure = {"status": "failed", "progress": 100, "error_code": "render_failed", "error_message": str(error)[:2000]}
-        control_plane.update_job(job_id, **failure)
+        try:
+            if current_status not in {"completed", "failed"}:
+                control_plane.transition_job(
+                    job_id,
+                    worker_id,
+                    current_status,
+                    "failed",
+                    progress=100,
+                    error_code="render_failed",
+                    error_message=str(error)[:2000],
+                    completed_at=datetime.now(timezone.utc).isoformat(),
+                    lease_expires_at=None,
+                )
+        except Exception:
+            pass
         raise
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
@@ -173,6 +202,8 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
             self._json(HTTPStatus.UNAUTHORIZED, {"error": str(error)})
         except ValueError as error:
             self._json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+        except JobClaimConflict as error:
+            self._json(HTTPStatus.CONFLICT, {"error": str(error)})
         except Exception as error:
             self._json(HTTPStatus.BAD_GATEWAY, {"error": str(error)})
 
