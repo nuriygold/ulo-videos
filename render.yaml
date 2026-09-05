@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: ulo-videos-render-worker
+    runtime: docker
+    plan: 1c-2g
+    dockerfilePath: ./worker/Dockerfile
+    dockerContext: .
+    healthCheckPath: /healthz
+    autoDeployTrigger: checksPass
+    envVars:
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: BLOB_READ_WRITE_TOKEN
+        sync: false
+      - key: RENDER_WORKER_SECRET
+        sync: false
+      - key: WORKER_ID
+        value: ulo-videos-render-worker
