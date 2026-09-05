@@ -11,6 +11,10 @@ class RenderJobSchemaMigrationTests(unittest.TestCase):
             "alter table public.render_jobs add column if not exists worker_id text;",
             migration_sql.lower(),
         )
+        self.assertIn(
+            "alter table public.render_jobs add column if not exists lease_expires_at timestamptz;",
+            migration_sql.lower(),
+        )
 
 
 if __name__ == "__main__":
