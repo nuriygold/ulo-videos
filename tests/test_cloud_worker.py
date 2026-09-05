@@ -44,14 +44,14 @@ class CloudWorkerContractTests(unittest.TestCase):
             logo="/tmp/logo.svg",
             caption_text="Every landlord knows real estate isn't passive.",
             caption_style="lower_third",
+            caption_file="/tmp/captions.ass",
         )
 
         self.assertEqual(command.count("-i"), 2)
         self.assertEqual(command[command.index("-i", command.index("-i") + 1) + 1], "/tmp/logo.svg")
         filters = command[command.index("-filter_complex") + 1]
         self.assertIn("overlay=W-w-48:H-h-48", filters)
-        self.assertIn("drawtext=text='Every landlord knows real estate", filters)
-        self.assertIn("y=h-th-60", filters)
+        self.assertIn("subtitles=filename='/tmp/captions.ass'", filters)
 
     def test_ffmpeg_logo_persists_for_the_entire_render(self):
         command = ffmpeg_command(
@@ -95,11 +95,25 @@ class CloudWorkerContractTests(unittest.TestCase):
             30,
             caption_text="Hold; freeze [now]: 100% \\done",
             caption_style="lower_third",
+            caption_file="/tmp/captions.ass",
         )
 
         filters = command[command.index("-filter_complex") + 1]
-        self.assertIn("expansion=none", filters)
-        self.assertIn(r"Hold\; freeze \[now\]\\: 100% \\\\done", filters)
+        self.assertIn("subtitles=filename='/tmp/captions.ass'", filters)
+
+    def test_caption_file_contains_deterministic_ass_timing_and_placement(self):
+        from ulo_videos.cloud_worker import write_caption_file
+
+        with tempfile.TemporaryDirectory() as temporary:
+            caption_file = Path(temporary) / "captions.ass"
+            write_caption_file(caption_file, "Wait — there is a clearer way.", 7.4, 9.4, "lower_third", 1920, 1080)
+            content = caption_file.read_text(encoding="utf-8")
+
+        self.assertIn("PlayResX: 1920", content)
+        self.assertIn("Dialogue: 0,0:00:07.40,0:00:09.40", content)
+        self.assertIn("Style: Default,DejaVu Sans,42", content)
+        self.assertIn(",0,2,48,48,60,1", content)
+        self.assertIn(",Default,,0,0,0,,Wait — there is a clearer way.", content)
 
     def test_source_download_uses_a_browser_compatible_user_agent(self):
         self.assertEqual(download_request("https://example.test/video.mp4").get_header("User-agent"), "ulo-videos-render-worker/1.0")
