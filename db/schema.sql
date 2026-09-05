@@ -47,6 +47,7 @@ create table if not exists render_jobs (
   progress integer not null default 0 check (progress between 0 and 100),
   attempt integer not null default 1,
   worker_id text,
+  lease_expires_at timestamptz,
   output_asset_id text references assets(id),
   error_code text,
   error_message text,
@@ -55,7 +56,10 @@ create table if not exists render_jobs (
   completed_at timestamptz
 );
 
+alter table render_jobs add column if not exists lease_expires_at timestamptz;
+
 create index if not exists projects_workspace_idx on projects(workspace_id);
 create index if not exists assets_workspace_idx on assets(workspace_id);
 create index if not exists shots_project_idx on shots(project_id);
 create index if not exists render_jobs_workspace_status_idx on render_jobs(workspace_id, status);
+create index if not exists render_jobs_claim_idx on render_jobs(status, lease_expires_at);

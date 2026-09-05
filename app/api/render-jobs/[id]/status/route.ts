@@ -1,13 +1,15 @@
 import { NextResponse } from "next/server";
 import { getSupabaseStore } from "../../../../../src/web/supabase-store";
-import { RENDER_STAGES } from "../../../../../src/web/contracts";
+import { RENDER_STAGES, type RenderStage } from "../../../../../src/web/contracts";
+import { isRenderTransitionAllowed } from "../../../../../src/web/render-state";
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const expected = process.env.RENDER_WORKER_SECRET;
   if (!expected || request.headers.get("authorization") !== `Bearer ${expected}`) return NextResponse.json({ error: "worker authorization required" }, { status: 401 });
   const body = await request.json().catch(() => null) as Record<string, unknown> | null;
   const { id } = await context.params;
-  if (!body || typeof body.status !== "string" || !RENDER_STAGES.includes(body.status as never) || typeof body.progress !== "number" || !Number.isInteger(body.progress) || body.progress < 0 || body.progress > 100) return NextResponse.json({ error: "status and integer progress 0-100 are required" }, { status: 400 });
+  if (!body || typeof body.status !== "string" || !RENDER_STAGES.includes(body.status as never) || typeof body.expected_status !== "string" || !RENDER_STAGES.includes(body.expected_status as never) || typeof body.progress !== "number" || !Number.isInteger(body.progress) || body.progress < 0 || body.progress > 100) return NextResponse.json({ error: "expected_status, status, and integer progress 0-100 are required" }, { status: 400 });
+  if (!isRenderTransitionAllowed(body.expected_status as RenderStage, body.status as RenderStage)) return NextResponse.json({ error: "render job state transition is not allowed" }, { status: 409 });
   try {
     const store = getSupabaseStore();
     const job = await store.getRenderJobById(id);
@@ -17,7 +19,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     if (typeof body.error_code === "string") update.error_code = body.error_code;
     if (typeof body.error_message === "string") update.error_message = body.error_message;
     if (body.status === "completed" || body.status === "failed") update.completed_at = new Date().toISOString();
-    await store.updateRenderJob(id, update);
+    const updated = await store.transitionRenderJob(id, body.expected_status as RenderStage, update);
+    if (!updated) return NextResponse.json({ error: "render job state is stale or already terminal" }, { status: 409 });
     return NextResponse.json({ accepted: true, jobId: id, status: body.status, progress: body.progress });
   } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "render job status could not be saved" }, { status: 503 }); }
 }

@@ -1,5 +1,7 @@
 /** Provider seams for the Vercel control plane. Implementations may use Neon,
  * Vercel Blob, and any queue without changing the shot editor or worker. */
+import type { RenderStage } from "./contracts";
+
 export type AssetRole = "source_video" | "character" | "logo" | "audio" | "font" | "render_output";
 
 export type AssetRecord = { id: string; workspaceId: string; projectId?: string; blobKey: string; blobUrl: string; role: AssetRole; mimeType: string; bytes: number; sha256?: string };
@@ -26,7 +28,8 @@ export interface ControlPlaneStore {
   createRenderJob(input: { id: string; workspaceId: string; projectId: string; shotId: string; template: string; templateVersion: number; specSnapshot: Record<string, unknown> }): Promise<void>;
   getRenderJob(id: string, workspaceId: string): Promise<Record<string, unknown> | null>;
   getRenderJobById(id: string): Promise<Record<string, unknown> | null>;
-  updateRenderJob(id: string, update: Record<string, unknown>): Promise<void>;
+  updateRenderJob(id: string, update: Record<string, unknown>, expectedStatus?: RenderStage): Promise<void>;
+  transitionRenderJob(id: string, expectedStatus: RenderStage, update: Record<string, unknown>): Promise<boolean>;
 }
 
 export interface RenderQueueProvider {

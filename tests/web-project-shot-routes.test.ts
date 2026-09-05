@@ -73,6 +73,7 @@ class MemoryStore implements ControlPlaneStore {
   async listRenderJobs() { return []; }
   async getRenderJob() { return null; }
   async updateRenderJob() {}
+  async transitionRenderJob() { return true; }
 }
 
 function handlers(store: MemoryStore, workspaceId?: string) {
