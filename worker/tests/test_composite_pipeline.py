@@ -190,7 +190,12 @@ class CompositePipelineTests(unittest.TestCase):
 
         class ControlPlane:
             def get_job(self, job_id): return job
-            def update_job(self, job_id, **fields): updates.append(fields)
+            def claim_job(self, job_id, worker_id):
+                updates.append({"status": "preparing", "progress": 5, "worker_id": worker_id})
+                return {**job, "status": "preparing"}
+            def transition_job(self, job_id, worker_id, expected_status, status, **fields):
+                updates.append({"status": status, **fields})
+                return True
             def download(self, url, destination):
                 Path(destination).parent.mkdir(parents=True, exist_ok=True)
                 Path(destination).write_bytes(b"asset")
@@ -226,7 +231,12 @@ class CompositePipelineTests(unittest.TestCase):
 
         class ControlPlane:
             def get_job(self, job_id): return job
-            def update_job(self, job_id, **fields): updates.append(fields)
+            def claim_job(self, job_id, worker_id):
+                updates.append({"status": "preparing", "progress": 5, "worker_id": worker_id})
+                return {**job, "status": "preparing"}
+            def transition_job(self, job_id, worker_id, expected_status, status, **fields):
+                updates.append({"status": status, **fields})
+                return True
             def download(self, url, destination):
                 Path(destination).parent.mkdir(parents=True, exist_ok=True)
                 Path(destination).write_bytes(b"asset")
@@ -261,7 +271,12 @@ class CompositePipelineTests(unittest.TestCase):
 
         class ControlPlane:
             def get_job(self, job_id): return job
-            def update_job(self, job_id, **fields): updates.append(fields)
+            def claim_job(self, job_id, worker_id):
+                updates.append({"status": "preparing", "progress": 5, "worker_id": worker_id})
+                return {**job, "status": "preparing"}
+            def transition_job(self, job_id, worker_id, expected_status, status, **fields):
+                updates.append({"status": status, **fields})
+                return True
             def download(self, url, destination):
                 Path(destination).parent.mkdir(parents=True, exist_ok=True)
                 Path(destination).write_bytes(b"asset")
@@ -272,10 +287,10 @@ class CompositePipelineTests(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "external resources"):
             execute_render_job("rj_123", ControlPlane(), run_command=run_command)
-        self.assertEqual(updates[-1], {
-            "status": "failed", "progress": 100, "error_code": "render_failed",
-            "error_message": ".gltf character references external resources (mesh.bin)",
-        })
+        self.assertEqual(updates[-1]["status"], "failed")
+        self.assertEqual(updates[-1]["progress"], 100)
+        self.assertEqual(updates[-1]["error_code"], "render_failed")
+        self.assertEqual(updates[-1]["error_message"], ".gltf character references external resources (mesh.bin)")
 
     def test_completed_job_is_not_rendered_again_when_the_queue_retries(self):
         from worker.service import execute_render_job

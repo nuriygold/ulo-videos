@@ -95,6 +95,7 @@ class MemoryControlPlaneStore implements ControlPlaneStore {
   async listRenderJobs() { return []; }
   async getRenderJob() { return null; }
   async updateRenderJob() {}
+  async transitionRenderJob() { return true; }
 }
 
 test("project helpers trim names and list only the anonymous workspace", async () => {
