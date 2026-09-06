@@ -33,10 +33,14 @@ The request handler must reject all of the following before starting a render:
 - a non-JSON body, missing `renderJobId`, or an ID not starting with `rj_`
   (`400`)
 
-The current service runs a job synchronously and returns `200 OK` only after
-the worker has written its terminal state. The authoritative result remains
-the `render_jobs` record in Supabase. This deliberately avoids acknowledging a
-render from an in-memory background thread that a restart could lose.
+The current service accepts the job into its single in-process render slot and
+returns `202 Accepted` before the terminal state is available. The worker
+continues writing stages and the authoritative result remains the
+`render_jobs` record in Supabase. This keeps Vercel from timing out while a
+Blender or FFmpeg render is running. The slot is not a durable queue: a worker
+restart can lose in-flight execution, so the job remains auditable in
+Supabase and a durable queue should replace this handoff for higher-volume
+production use.
 
 Keep the message shape exactly as above. Do not add source URLs, Blob tokens,
 or the scene specification to queue messages.
@@ -183,9 +187,9 @@ new job for each retry; the snapshot is intentionally immutable.
 
 ## Future deployment and queue switch
 
-The synchronous endpoint is suitable for testing, but it must not be used as
-the production dispatcher for long renders until a durable provider queue is
-available. Once that queue exists:
+The in-process endpoint is suitable for the current external container, but a
+durable provider queue is still the next production-hardening step. Once that
+queue exists:
 
 1. Deploy the image to a container platform that supports long-running CPU/GPU
    workloads, ephemeral disk sized for source assets and frames, and an HTTPS

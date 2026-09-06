@@ -7,6 +7,37 @@ from http.server import ThreadingHTTPServer
 
 
 class HttpContractTests(unittest.TestCase):
+    def test_blender_output_pattern_matches_the_five_digit_compositor_contract(self):
+        script = (Path(__file__).parents[1] / "blender_character.py").read_text()
+
+        self.assertIn(
+            'scene.render.filepath = os.path.join(args.output_dir, "character_#####")',
+            script,
+        )
+
+    def test_async_dispatch_acknowledges_before_render_finishes(self):
+        from worker.service import dispatch_render_job_async
+
+        started = threading.Event()
+        release = threading.Event()
+        finished = threading.Event()
+
+        def execute(job_id, control_plane):
+            started.set()
+            release.wait(timeout=3)
+            finished.set()
+            return {"jobId": job_id, "status": "completed"}
+
+        try:
+            result = dispatch_render_job_async("rj_async", object(), execute=execute)
+            self.assertEqual(result, {"jobId": "rj_async", "status": "accepted", "progress": 0})
+            self.assertTrue(started.wait(timeout=3))
+            self.assertFalse(finished.is_set())
+        finally:
+            release.set()
+
+        self.assertTrue(finished.wait(timeout=3))
+
     def test_authenticated_request_accepts_only_the_existing_queue_message(self):
         from worker.http_contract import authenticate_render_request
 
@@ -85,7 +116,7 @@ class HttpContractTests(unittest.TestCase):
             server.shutdown()
             server.server_close()
 
-    def test_post_only_accepts_render_jobs_path_and_completes_synchronously(self):
+    def test_post_only_accepts_render_jobs_path_without_waiting_for_render_completion(self):
         from worker.service import RenderRequestHandler
 
         class ControlPlane: pass
@@ -111,8 +142,8 @@ class HttpContractTests(unittest.TestCase):
                 connection = HTTPConnection("127.0.0.1", port, timeout=3)
                 connection.request("POST", "/render-jobs", body=b'{"renderJobId":"rj_123"}', headers={"Authorization": "Bearer shared-secret", "Content-Type": "application/json"})
                 response = connection.getresponse()
-                self.assertEqual(response.status, 200)
-                self.assertEqual(json.loads(response.read()), {"jobId": "rj_123", "status": "completed"})
+                self.assertEqual(response.status, 202)
+                self.assertEqual(json.loads(response.read()), {"jobId": "rj_123", "status": "accepted", "progress": 0})
                 connection.close()
             finally:
                 if old_secret is None:
