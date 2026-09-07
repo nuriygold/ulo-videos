@@ -61,17 +61,19 @@ contract, container requirements, deployment boundary, and migration procedure.
 
 ## Current production state
 
-Production currently reports the `vercel_fallback` renderer. It is intended for
-control-plane and fallback-capability testing, not as the long-running
-production media worker. Character rendering, source-audio preservation,
-speech, and lip-sync are unavailable in this mode.
+Production is configured for the external Blender + FFmpeg worker when its
+health check is reachable. The worker applies character rendering, freeze /
+resume, branding, and captions; source-audio preservation, speech, and
+lip-sync remain unavailable. If the health check is unavailable, the UI reports
+the separate `vercel_fallback` capability set instead of claiming character
+support.
 
 The latest verification record is in
 [docs/verification-reports/2026-09-04-172512-PDT-ulovideos-production-verification.md](docs/verification-reports/2026-09-04-172512-PDT-ulovideos-production-verification.md).
-That report records a known fallback render-completion blocker: the synchronous
-Vercel render path returned HTTP 502 with FFmpeg output. Do not describe the
-fallback as a completed production rendering service until that path is fixed
-or production is moved to a durable external worker queue.
+That report records the earlier fallback render-completion blocker: the
+synchronous Vercel render path returned HTTP 502 with FFmpeg output. The
+external worker is the production media path; its HTTP handoff acknowledges
+quickly and reports the terminal result through Supabase.
 
 ## Development
 
@@ -103,9 +105,9 @@ RENDER_WORKER_SECRET
 ```
 
 The external worker uses the Supabase, Blob, and worker-secret values above.
-`RENDER_QUEUE_URL` must point at an authenticated dispatcher or queue endpoint;
-the synchronous worker endpoint is for testing and controlled migration work,
-not long production renders.
+`RENDER_QUEUE_URL` must point at an authenticated dispatcher or queue endpoint.
+The worker endpoint acknowledges a render before the long-running media work
+finishes; Supabase remains the source of truth for live status and output.
 
 ## Worker image
 

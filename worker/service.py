@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -128,6 +129,7 @@ def execute_render_job(job_id, control_plane, *, worker_id=None, run_command=_ru
 
 _in_progress_lock = threading.Lock()
 _in_progress_jobs = set()
+_render_pool = ThreadPoolExecutor(max_workers=1)
 
 
 def dispatch_render_job(job_id, control_plane, *, execute=execute_render_job):
@@ -141,6 +143,31 @@ def dispatch_render_job(job_id, control_plane, *, execute=execute_render_job):
     finally:
         with _in_progress_lock:
             _in_progress_jobs.discard(job_id)
+
+
+def _run_async_render_job(job_id, control_plane, execute):
+    try:
+        execute(job_id, control_plane)
+    except Exception:
+        print(f"render job {job_id} failed", flush=True)
+    finally:
+        with _in_progress_lock:
+            _in_progress_jobs.discard(job_id)
+
+
+def dispatch_render_job_async(job_id, control_plane, *, execute=execute_render_job):
+    """Accept a render and keep the long-running execution off the HTTP request."""
+    with _in_progress_lock:
+        if job_id in _in_progress_jobs:
+            return {"jobId": job_id, "status": "rendering", "progress": 0}
+        _in_progress_jobs.add(job_id)
+    try:
+        _render_pool.submit(_run_async_render_job, job_id, control_plane, execute)
+    except Exception:
+        with _in_progress_lock:
+            _in_progress_jobs.discard(job_id)
+        raise
+    return {"jobId": job_id, "status": "accepted", "progress": 0}
 
 
 def executable_status(*, which=shutil.which, run=subprocess.run):
@@ -196,8 +223,8 @@ class RenderRequestHandler(BaseHTTPRequestHandler):
             if content_length < 1 or content_length > 16_384:
                 raise ValueError("request body must be between 1 and 16384 bytes")
             job_id = authenticate_render_request(self.rfile.read(content_length), self.headers.get("Authorization", ""), os.environ.get("RENDER_WORKER_SECRET"))
-            result = dispatch_render_job(job_id, self.control_plane_factory(), execute=self.render_executor)
-            self._json(HTTPStatus.OK, result)
+            result = dispatch_render_job_async(job_id, self.control_plane_factory(), execute=self.render_executor)
+            self._json(HTTPStatus.ACCEPTED, result)
         except PermissionError as error:
             self._json(HTTPStatus.UNAUTHORIZED, {"error": str(error)})
         except ValueError as error:

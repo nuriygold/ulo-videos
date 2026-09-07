@@ -183,7 +183,7 @@ def main():
     if os.path.isdir(args.output_dir):
         shutil.rmtree(args.output_dir)
     os.makedirs(args.output_dir, exist_ok=True)
-    scene.render.filepath = os.path.join(args.output_dir, "character_")
+    scene.render.filepath = os.path.join(args.output_dir, "character_#####")
 
     start_location = armature.location.copy()
     start_scale = armature.scale.copy()

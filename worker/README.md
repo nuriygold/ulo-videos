@@ -9,8 +9,9 @@ records as the current control plane.
 ```
 
 `POST /render-jobs` validates `Authorization: Bearer $RENDER_WORKER_SECRET`
-and runs the job synchronously, returning `200` only after the terminal job
-state is written. `GET /healthz` is an unauthenticated readiness check and
+and queues the job in the worker's single in-process render slot, returning
+`202` immediately. The worker continues updating the authoritative job record
+as the render progresses. `GET /healthz` is an unauthenticated readiness check and
 returns `503` until FFmpeg, Blender, and `rsvg-convert` execute successfully.
 
 ## What this worker renders
@@ -54,11 +55,13 @@ diagnostics. Do not put any of these values in source control.
 
 ## Control-plane integration
 
-Use the synchronous `/render-jobs` endpoint for local and integration testing
-only. Do not configure it as Vercel's production `RENDER_QUEUE_URL` for long
-renders until a durable provider queue exists. Keep `RENDER_WORKER_SECRET`
-identical wherever the eventual dispatcher and worker run; the queue message,
-database schema, browser code, and Vercel Function contract remain unchanged.
+The `/render-jobs` endpoint keeps the Vercel request short by handing work to
+the worker's in-process render slot. It is suitable for the current external
+container, but it is not a durable queue: a worker restart loses in-flight
+execution and the job remains auditable in Supabase. Keep
+`RENDER_WORKER_SECRET` identical wherever the dispatcher and worker run; the
+queue message, database schema, browser code, and Vercel Function contract
+remain unchanged.
 
 The worker relies on the existing immutable snapshot fields: `source.video`,
 the first character element's `asset`, `branding.logo`, `trigger`, `captions`,
